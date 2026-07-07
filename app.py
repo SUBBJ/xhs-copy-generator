@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib import error, parse, request
 
 import streamlit as st
@@ -19,47 +19,6 @@ DEFAULT_IDENTITIES = {
     "personal": "我是打工人，正在做个人账号，时间和资源有限。请默认给我可执行、接地气、低成本、能长期坚持的建议。",
 }
 
-MODEL_SECRET_KEYS = {
-    "deepseek_chat": ["DEEPSEEK_API_KEY", "deepseek_api_key"],
-    "glm_4_flash": ["ZHIPU_API_KEY", "BIGMODEL_API_KEY", "zhipu_api_key"],
-    "gpt_4o": ["OPENAI_API_KEY", "GPT_API_KEY", "openai_api_key"],
-}
-
-KEY_DETECTION_RULES = [
-    {
-        "model_key": "gpt_4o",
-        "label": "GPT-4o",
-        "patterns": [
-            r"^sk-proj-",
-            r"^sk-live-",
-            r"^sess-",
-            r"^fk",
-            r"^gpt-",
-        ],
-    },
-    {
-        "model_key": "deepseek_chat",
-        "label": "DeepSeek",
-        "patterns": [
-            r"^sk-[A-Za-z0-9]{30,40}$",
-        ],
-    },
-    {
-        "model_key": "gpt_4o",
-        "label": "GPT-4o",
-        "patterns": [
-            r"^sk-[A-Za-z0-9]{1,24}$",
-        ],
-    },
-    {
-        "model_key": "glm_4_flash",
-        "label": "智谱 GLM-4-Flash",
-        "patterns": [
-            r"^(?!sk-)[A-Za-z0-9][A-Za-z0-9._-]{15,}$",
-        ],
-    },
-]
-
 MODE_META = {
     "work": {
         "label": "工作模式",
@@ -75,28 +34,24 @@ MODE_META = {
     },
 }
 
-SEARCH_KEYWORDS = [
-    "最新",
-    "最近",
-    "这两天",
-    "今天",
-    "趋势",
-    "爆款",
-    "热门",
-    "选题",
-    "赛道",
-]
+SEARCH_KEYWORDS = ["最新", "最近", "这两天", "今天", "趋势", "爆款", "热门", "选题", "赛道"]
+
+PROVIDER_DISPLAY_ORDER = ["openai_compatible", "deepseek", "zhipu"]
+PROVIDER_LABELS = {
+    "openai_compatible": "OpenAI",
+    "deepseek": "DeepSeek",
+    "zhipu": "质谱",
+}
+AUTO_DETECT_MODEL_ORDER = ["glm_4_flash", "deepseek_chat"]
 
 
 @st.cache_data(show_spinner=False)
 def read_text(file_path: Path) -> str:
-    """读取 UTF-8 文本。"""
     return file_path.read_text(encoding="utf-8-sig")
 
 
 @st.cache_data(show_spinner=False)
 def load_prompt(file_name: str) -> str:
-    """读取外部提示词文件。"""
     file_path = PROMPTS_DIR / file_name
     if not file_path.exists():
         return ""
@@ -105,7 +60,6 @@ def load_prompt(file_name: str) -> str:
 
 @st.cache_data(show_spinner=False)
 def load_model_config() -> Dict[str, Any]:
-    """读取模型配置。"""
     config_path = CONFIG_DIR / "models.json"
     if not config_path.exists():
         return {"default_model": "deepseek_chat", "models": {}}
@@ -113,7 +67,6 @@ def load_model_config() -> Dict[str, Any]:
 
 
 def save_model_config(model_config: Dict[str, Any]) -> None:
-    """写回模型配置，并刷新缓存。"""
     config_path = CONFIG_DIR / "models.json"
     config_path.write_text(
         json.dumps(model_config, ensure_ascii=False, indent=2) + "\n",
@@ -124,11 +77,9 @@ def save_model_config(model_config: Dict[str, Any]) -> None:
 
 
 def persist_default_model(model_key: str) -> None:
-    """把当前识别出的模型保存为默认模型。"""
     model_config = st.session_state.get("model_config") or load_model_config()
     if model_config.get("default_model") == model_key:
         return
-
     model_config["default_model"] = model_key
     save_model_config(model_config)
     st.session_state.model_config = model_config
@@ -136,7 +87,6 @@ def persist_default_model(model_key: str) -> None:
 
 @st.cache_data(show_spinner=False)
 def load_rules_report() -> str:
-    """读取规律汇总报告。"""
     if not RULES_FILE.exists():
         return "未找到规律汇总报告。"
     return read_text(RULES_FILE)
@@ -144,11 +94,9 @@ def load_rules_report() -> str:
 
 @st.cache_data(show_spinner=False)
 def load_deconstruction_results() -> List[Dict[str, str]]:
-    """读取拆解结果库。"""
     results: List[Dict[str, str]] = []
     if not DECONSTRUCT_DIR.exists():
         return results
-
     for file_path in sorted(DECONSTRUCT_DIR.glob("*.md")):
         results.append({"file_name": file_path.name, "content": read_text(file_path)})
     return results
@@ -156,14 +104,12 @@ def load_deconstruction_results() -> List[Dict[str, str]]:
 
 @st.cache_data(show_spinner=False)
 def build_rules_summary(report_text: str) -> str:
-    """抽取规律报告中最适合侧边栏展示的摘要。"""
     wanted_headers = [
         "## 3. 共性规律提炼",
         "## 5. 可复用的爆款公式总结",
         "## 6. 风险提示与注意事项",
     ]
     sections: List[str] = []
-
     for header in wanted_headers:
         start = report_text.find(header)
         if start == -1:
@@ -171,14 +117,12 @@ def build_rules_summary(report_text: str) -> str:
         next_header = report_text.find("\n## ", start + 1)
         section = report_text[start:] if next_header == -1 else report_text[start:next_header]
         sections.append(section.strip())
-
     if sections:
         return "\n\n".join(sections)
     return report_text[:1800]
 
 
 def build_reference_digest(results: List[Dict[str, str]], max_items: int = 3) -> str:
-    """压缩拆解结果，降低提示词噪音。"""
     digests: List[str] = []
     for item in results[:max_items]:
         digests.append(f"### 参考拆解：{item['file_name']}\n{item['content'][:1800]}")
@@ -186,12 +130,54 @@ def build_reference_digest(results: List[Dict[str, str]], max_items: int = 3) ->
 
 
 def clean_text(value: str) -> str:
-    """清洗模型和搜索上下文中的多余空白。"""
     return re.sub(r"\n{3,}", "\n\n", value.strip())
 
 
+def get_selected_model_info(model_config: Dict[str, Any], selected_model: str) -> Dict[str, Any]:
+    return model_config.get("models", {}).get(selected_model, {})
+
+
+def get_provider_key(model_info: Dict[str, Any]) -> str:
+    return str(model_info.get("provider", "")).strip()
+
+
+def get_provider_models(model_config: Dict[str, Any], provider_key: str) -> List[Tuple[str, Dict[str, Any]]]:
+    provider_models: List[Tuple[str, Dict[str, Any]]] = []
+    for model_key, model_info in model_config.get("models", {}).items():
+        if not model_info.get("enabled", True):
+            continue
+        if get_provider_key(model_info) == provider_key:
+            provider_models.append((model_key, model_info))
+    return provider_models
+
+
+def get_provider_api_key_from_config(model_config: Dict[str, Any], model_key: str) -> str:
+    model_info = get_selected_model_info(model_config, model_key)
+    provider_key = get_provider_key(model_info)
+    if not provider_key:
+        return str(model_info.get("api_key", "")).strip()
+    for _sibling_model_key, sibling_info in get_provider_models(model_config, provider_key):
+        api_key = str(sibling_info.get("api_key", "")).strip()
+        if api_key:
+            return api_key
+    return ""
+
+
+def sync_provider_api_key_in_config(model_config: Dict[str, Any], model_key: str, api_key: str) -> Dict[str, Any]:
+    models = model_config.get("models", {})
+    model_info = models.get(model_key, {})
+    provider_key = get_provider_key(model_info)
+    normalized_key = api_key.strip()
+    if not provider_key:
+        if model_key in models:
+            models[model_key]["api_key"] = normalized_key
+        return model_config
+    for sibling_model_key, _sibling_info in get_provider_models(model_config, provider_key):
+        models[sibling_model_key]["api_key"] = normalized_key
+    return model_config
+
+
 def get_model_options(model_config: Dict[str, Any]) -> List[Dict[str, str]]:
-    """生成模型下拉列表。"""
     options: List[Dict[str, str]] = []
     for model_key, model_info in model_config.get("models", {}).items():
         if not model_info.get("enabled", True):
@@ -200,78 +186,133 @@ def get_model_options(model_config: Dict[str, Any]) -> List[Dict[str, str]]:
     return options
 
 
-def get_selected_model_info(model_config: Dict[str, Any], selected_model: str) -> Dict[str, Any]:
-    """获取当前模型配置。"""
-    return model_config.get("models", {}).get(selected_model, {})
-
-
-def get_config_api_key(model_info: Dict[str, Any]) -> str:
-    """从配置文件里读取回退 API Key。"""
-    return str(model_info.get("api_key", "")).strip()
+def build_provider_display_options(model_config: Dict[str, Any]) -> List[Dict[str, str]]:
+    grouped_items: List[Dict[str, str]] = []
+    seen_providers = set()
+    ordered_providers = list(PROVIDER_DISPLAY_ORDER)
+    ordered_providers.extend(
+        [
+            get_provider_key(model_info)
+            for _model_key, model_info in model_config.get("models", {}).items()
+            if model_info.get("enabled", True) and get_provider_key(model_info) not in PROVIDER_DISPLAY_ORDER
+        ]
+    )
+    for provider_key in ordered_providers:
+        if not provider_key or provider_key in seen_providers:
+            continue
+        provider_models = get_provider_models(model_config, provider_key)
+        if not provider_models:
+            continue
+        display_names = [str(item[1].get("label") or item[1].get("name") or item[0]) for item in provider_models]
+        grouped_items.append(
+            {
+                "key": provider_models[0][0],
+                "provider": provider_key,
+                "name": f"{PROVIDER_LABELS.get(provider_key, provider_key)}（{' / '.join(display_names)}）",
+            }
+        )
+        seen_providers.add(provider_key)
+    return grouped_items
 
 
 def resolve_api_key(model_key: str, model_info: Dict[str, Any]) -> str:
-    """按优先级决定最终可用的 API Key。"""
     manual_api_keys = st.session_state.get("manual_api_keys", {})
+    provider_key = get_provider_key(model_info)
+    if provider_key:
+        for sibling_model_key, _sibling_info in get_provider_models(st.session_state.model_config, provider_key):
+            manual_key = str(manual_api_keys.get(sibling_model_key, "")).strip()
+            if manual_key:
+                return manual_key
+        return get_provider_api_key_from_config(st.session_state.model_config, model_key)
     manual_key = str(manual_api_keys.get(model_key, "")).strip()
     if manual_key:
         return manual_key
-
-    return get_config_api_key(model_info)
+    return str(model_info.get("api_key", "")).strip()
 
 
 def persist_model_api_key(model_key: str, api_key: str) -> None:
-    """把当前模型的 API Key 持久化到配置文件。"""
     model_config = st.session_state.get("model_config") or load_model_config()
     models = model_config.get("models", {})
     if model_key not in models:
         return
-
     normalized_key = api_key.strip()
-    current_key = str(models[model_key].get("api_key", "")).strip()
+    current_key = get_provider_api_key_from_config(model_config, model_key)
     if current_key == normalized_key:
         return
-
-    models[model_key]["api_key"] = normalized_key
+    sync_provider_api_key_in_config(model_config, model_key, normalized_key)
     save_model_config(model_config)
     st.session_state.model_config = model_config
+    provider_key = get_provider_key(models[model_key])
+    if provider_key:
+        for sibling_model_key, _sibling_info in get_provider_models(model_config, provider_key):
+            st.session_state.manual_api_keys[sibling_model_key] = normalized_key
 
 
-def detect_model_from_api_key(api_key: str, model_config: Dict[str, Any]) -> Optional[str]:
-    """根据 API Key 特征自动识别模型。"""
+def verify_api_key_with_model(api_key: str, model_info: Dict[str, Any]) -> bool:
+    api_url = str(model_info.get("api_base") or model_info.get("api_url", "")).strip()
+    model_name = str(model_info.get("model") or model_info.get("model_name", "")).strip()
+    if api_url.endswith("/"):
+        api_url = f"{api_url}chat/completions"
+    if not api_url or not model_name or not api_key.strip():
+        return False
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "temperature": 0,
+        "max_tokens": 5,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key.strip()}",
+    }
+    req = request.Request(
+        api_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=20) as response:
+            raw = response.read().decode("utf-8")
+        data = json.loads(raw)
+        content = str(data.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+        return bool(content)
+    except Exception:
+        return False
+
+
+def detect_model_by_real_verification(
+    api_key: str,
+    model_config: Dict[str, Any],
+    verify_func: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
+) -> Tuple[Optional[str], bool]:
     normalized_key = api_key.strip()
     if not normalized_key:
-        return None
-
-    enabled_models = model_config.get("models", {})
-    for rule in KEY_DETECTION_RULES:
-        model_key = rule["model_key"]
-        if model_key not in enabled_models:
+        return None, False
+    verifier = verify_func or verify_api_key_with_model
+    for model_key in AUTO_DETECT_MODEL_ORDER:
+        model_info = get_selected_model_info(model_config, model_key)
+        if not model_info or not model_info.get("enabled", True):
             continue
-        for pattern in rule["patterns"]:
-            if re.match(pattern, normalized_key):
-                return model_key
-    return None
+        if verifier(normalized_key, model_info):
+            return model_key, False
+    return None, True
 
 
 def get_model_display_name(model_key: str) -> str:
-    """获取模型展示名。"""
     model_info = get_selected_model_info(st.session_state.model_config, model_key)
     return str(model_info.get("name", model_key))
 
 
 def get_mode_prefix(mode: str) -> str:
-    """获取模式前缀。"""
     return MODE_META[mode]["session_prefix"]
 
 
 def get_mode_key(mode: str, suffix: str) -> str:
-    """生成模式隔离后的 session_state key。"""
     return f"{get_mode_prefix(mode)}_{suffix}"
 
 
 def ensure_mode_state(mode: str) -> None:
-    """初始化某个模式独立状态。"""
     defaults = {
         get_mode_key(mode, "messages"): [],
         get_mode_key(mode, "draft_history"): [],
@@ -285,7 +326,6 @@ def ensure_mode_state(mode: str) -> None:
 
 
 def init_session_state() -> None:
-    """初始化全局会话状态。"""
     if "mode" not in st.session_state:
         st.session_state.mode = "work"
     if "manual_api_keys" not in st.session_state:
@@ -294,13 +334,13 @@ def init_session_state() -> None:
         st.session_state.runtime_logs = []
     if "api_key_status" not in st.session_state:
         st.session_state.api_key_status = ""
-
+    if "api_key_requires_manual_selection" not in st.session_state:
+        st.session_state.api_key_requires_manual_selection = False
     ensure_mode_state("work")
     ensure_mode_state("personal")
 
 
 def init_static_session_data() -> None:
-    """只在会话开始时准备静态数据。"""
     if "rules_text" not in st.session_state:
         st.session_state.rules_text = load_rules_report()
     if "rules_summary" not in st.session_state:
@@ -313,6 +353,8 @@ def init_static_session_data() -> None:
         st.session_state.model_config = load_model_config()
     if "model_options" not in st.session_state:
         st.session_state.model_options = get_model_options(st.session_state.model_config)
+    if "provider_display_options" not in st.session_state:
+        st.session_state.provider_display_options = build_provider_display_options(st.session_state.model_config)
 
     valid_keys = [item["key"] for item in st.session_state.model_options]
     default_model = st.session_state.model_config.get("default_model", "deepseek_chat")
@@ -322,13 +364,12 @@ def init_static_session_data() -> None:
     for model_option in st.session_state.model_options:
         model_key = model_option["key"]
         model_info = get_selected_model_info(st.session_state.model_config, model_key)
-        config_key = get_config_api_key(model_info)
+        config_key = get_provider_api_key_from_config(st.session_state.model_config, model_key)
         current_manual = str(st.session_state.manual_api_keys.get(model_key, "")).strip()
         if config_key and current_manual != config_key:
             st.session_state.manual_api_keys[model_key] = config_key
         elif model_key not in st.session_state.manual_api_keys:
-            saved_key = get_config_api_key(model_info)
-            st.session_state.manual_api_keys[model_key] = saved_key
+            st.session_state.manual_api_keys[model_key] = config_key
 
     if "api_key_input" not in st.session_state:
         current_model = st.session_state.selected_model
@@ -337,7 +378,6 @@ def init_static_session_data() -> None:
 
 
 def log_runtime(message: str) -> None:
-    """记录页面级运行日志，便于侧边栏观察。"""
     timestamp = datetime.now().strftime("%H:%M:%S")
     logs = st.session_state.get("runtime_logs", [])
     logs.append(f"[{timestamp}] {message}")
@@ -345,52 +385,43 @@ def log_runtime(message: str) -> None:
 
 
 def sync_api_key_input_for_model() -> None:
-    """切换模型时同步当前模型的 API Key 到输入框。"""
     current_model = st.session_state.selected_model
     current_info = get_selected_model_info(st.session_state.model_config, current_model)
     st.session_state.api_key_input = resolve_api_key(current_model, current_info)
 
 
 def set_mode(mode: str) -> None:
-    """切换模式，只更新 session_state。"""
     if st.session_state.mode != mode:
         st.session_state.mode = mode
 
 
 def get_current_messages(mode: str) -> List[Dict[str, str]]:
-    """读取当前模式的消息记录。"""
     return st.session_state[get_mode_key(mode, "messages")]
 
 
 def get_current_draft_history(mode: str) -> List[str]:
-    """读取当前模式的草稿历史。"""
     return st.session_state[get_mode_key(mode, "draft_history")]
 
 
 def get_current_latest_output(mode: str) -> str:
-    """读取当前模式最近一次输出。"""
     return st.session_state[get_mode_key(mode, "latest_output")]
 
 
 def get_current_identity(mode: str) -> str:
-    """读取当前模式身份。"""
     return st.session_state[get_mode_key(mode, "identity")]
 
 
 def set_current_identity(mode: str, identity_text: str) -> None:
-    """更新当前模式身份。"""
     st.session_state[get_mode_key(mode, "identity")] = identity_text.strip()
 
 
 def append_mode_message(mode: str, role: str, content: str) -> None:
-    """往指定模式追加一条消息。"""
     messages = get_current_messages(mode)
     messages.append({"role": role, "content": content})
     st.session_state[get_mode_key(mode, "messages")] = messages
 
 
 def save_mode_output(mode: str, output_text: str) -> None:
-    """保存当前模式最近输出和草稿历史。"""
     st.session_state[get_mode_key(mode, "latest_output")] = output_text
     draft_history = get_current_draft_history(mode)
     draft_history.append(output_text)
@@ -398,63 +429,38 @@ def save_mode_output(mode: str, output_text: str) -> None:
 
 
 def is_edit_request(user_text: str) -> bool:
-    """判断是否为连续改稿请求。"""
-    keywords = [
-        "改标题",
-        "换开头",
-        "改开头",
-        "缩短",
-        "压缩",
-        "重写",
-        "拼一下",
-        "融合",
-        "合并",
-        "像我一点",
-        "太官方",
-        "这个可以了",
-        "再来一版",
-        "优化一下",
-    ]
+    keywords = ["改标题", "换开头", "改开头", "缩短", "压缩", "重写", "拼一个", "融合", "合并", "像我一点", "太官方", "这个可以吗", "再来一版", "优化一个"]
     return any(keyword in user_text for keyword in keywords)
 
 
 def should_trigger_realtime_search(user_text: str) -> bool:
-    """判断这轮是否值得补充实时搜索。"""
     return any(keyword in user_text for keyword in SEARCH_KEYWORDS)
 
 
 def parse_identity_update(user_text: str, current_mode: str) -> Optional[Tuple[str, str]]:
-    """识别用户是否在更新身份档案。"""
     normalized = user_text.strip()
     if "记住这个身份" in normalized or "记住我的身份" in normalized:
-        return current_mode, normalized.replace("记住这个身份", "").replace("记住我的身份", "").strip("：:，, ")
+        return current_mode, normalized.replace("记住这个身份", "").replace("记住我的身份", "").strip("：: ")
 
-    mode_prefix_map = {
-        "工作模式": "work",
-        "个人模式": "personal",
-    }
-
+    mode_prefix_map = {"工作模式": "work", "个人模式": "personal"}
     for text_prefix, mode in mode_prefix_map.items():
         patterns = [
-            rf"^{text_prefix}下[，,：: ]*(.*)$",
-            rf"^{text_prefix}[，,：: ]*我是(.*)$",
-            rf"^{text_prefix}的定位改一下[，,：: ]*(.*)$",
-            rf"^{text_prefix}记住[，,：: ]*(.*)$",
+            rf"^{text_prefix}[:： ]*(.*)$",
+            rf"^{text_prefix}[：: ]*我是(.*)$",
+            rf"^{text_prefix}的定位改一下[:： ]*(.*)$",
+            rf"^{text_prefix}记住[：: ]*(.*)$",
         ]
         for pattern in patterns:
             match = re.match(pattern, normalized)
             if match:
-                identity_text = match.group(1).strip()
-                return mode, identity_text
+                return mode, match.group(1).strip()
 
     if normalized.startswith("我是") and ("记住" in normalized or "以后按这个" in normalized):
         return current_mode, normalized
-
     return None
 
 
 def build_identity_confirmation(mode: str, identity_text: str) -> str:
-    """生成身份更新确认话术。"""
     mode_label = MODE_META[mode]["label"]
     return (
         f"已记住你的{mode_label}身份设定。\n\n"
@@ -464,33 +470,20 @@ def build_identity_confirmation(mode: str, identity_text: str) -> str:
 
 
 def build_system_prompt(mode: str, identity_text: str) -> str:
-    """组装系统提示词。"""
     system_file = "system_work.md" if mode == "work" else "system_personal.md"
     task_file = "task_work_delivery.md" if mode == "work" else "task_personal_startup.md"
-
     blocks = [
         load_prompt(system_file),
         load_prompt(task_file),
         load_prompt("task_iterate_edit.md"),
         f"当前模式身份档案：\n{identity_text}",
-        (
-            "输出必须优先采用讨论式结构：\n"
-            "1. 我的判断：先说你看到了什么、参考了什么、为什么这样判断。\n"
-            "2. 初稿或方案：再给可执行结果。\n"
-            "3. 主动追问：最后自然地问用户这个方向是否对、哪里要改。\n"
-            "除非用户明确要求直接成稿，否则不能跳过“我的判断”。\n"
-            "“可直接提交版本”或“汇报说明”只能放在第二段里，不能替代第一段。\n"
-            "语气要像真人搭档，不要像冷冰冰模板。"
-        ),
     ]
     return "\n\n".join([block for block in blocks if block]).strip()
 
 
 def format_search_context(search_items: List[Dict[str, str]]) -> str:
-    """把搜索结果压缩成提示词上下文。"""
     if not search_items:
         return "本轮未补充实时搜索结果。"
-
     lines = ["本轮补充了实时搜索线索，请优先把它们作为最新市场信号使用："]
     for index, item in enumerate(search_items, start=1):
         lines.append(
@@ -501,7 +494,6 @@ def format_search_context(search_items: List[Dict[str, str]]) -> str:
 
 
 def get_latest_context_block(mode: str) -> str:
-    """获取当前模式最近一次输出。"""
     latest_output = get_current_latest_output(mode)
     return latest_output[:2500] if latest_output else "暂无"
 
@@ -513,14 +505,12 @@ def build_user_prompt(
     references_text: str,
     search_context: str,
 ) -> str:
-    """构造用户提示词。"""
     mode_name = MODE_META[mode]["label"]
     edit_hint = (
-        "这是一次连续修改请求，请优先在已确认方向上做局部迭代，不要整篇推翻重来。"
+        "这是一轮连续修改请求，请优先在已确认方向上做局部迭代，不要整篇推翻重来。"
         if is_edit_request(user_text)
         else "这是一次新的内容请求，请先做判断，再给方案或初稿。"
     )
-
     return clean_text(
         f"""
 当前模式：{mode_name}
@@ -542,14 +532,6 @@ def build_user_prompt(
 
 实时搜索补充：
 {search_context}
-
-请严格按下面的输出体验来：
-1. 先写“我的判断”，说清楚你是怎么理解这个需求的、参考了什么、为什么建议这个方向。
-2. 再给“文案初稿”或“可执行方案”。
-3. 最后主动追问一句，邀请我继续改，而不是一次性结束。
-4. 不要一上来就只给“可直接提交版本”和“汇报说明”，那只能作为第二段里的补充。
-5. 如果是工作模式，要更像可交付内容搭档，兼顾交付和汇报口径。
-6. 如果是个人模式，要更像陪我一起起号的真人策划，建议要低门槛、能落地。
 """
     )
 
@@ -561,10 +543,8 @@ def build_model_payload(
     references_text: str,
     search_context: str,
 ) -> List[Dict[str, str]]:
-    """生成模型调用消息列表。"""
     system_prompt = build_system_prompt(mode, get_current_identity(mode))
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
-
     history = get_current_messages(mode)[-8:]
     messages.extend(history)
     messages.append(
@@ -578,7 +558,6 @@ def build_model_payload(
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def search_hot_posts(query: str) -> List[Dict[str, str]]:
-    """基于 DuckDuckGo 的轻量实时搜索，补充最新公开网页线索。"""
     url = f"https://duckduckgo.com/html/?q={parse.quote(query)}"
     req = request.Request(
         url,
@@ -590,11 +569,10 @@ def search_hot_posts(query: str) -> List[Dict[str, str]]:
         },
         method="GET",
     )
-
     try:
         with request.urlopen(req, timeout=20) as response:
             html = response.read().decode("utf-8", errors="ignore")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
 
     results: List[Dict[str, str]] = []
@@ -603,46 +581,28 @@ def search_hot_posts(query: str) -> List[Dict[str, str]]:
         r'<a[^>]*class="result__snippet"[^>]*>(?P<snippet>.*?)</a>',
         re.S,
     )
-
     for match in pattern.finditer(html):
         title = re.sub(r"<.*?>", "", match.group("title")).strip()
         snippet = re.sub(r"<.*?>", "", match.group("snippet")).strip()
         link = match.group("link").strip()
         if title:
-            results.append(
-                {
-                    "title": title,
-                    "snippet": snippet or "无法获取",
-                    "link": link,
-                    "source": "DuckDuckGo",
-                }
-            )
+            results.append({"title": title, "snippet": snippet or "无法获取", "link": link, "source": "DuckDuckGo"})
         if len(results) >= 5:
             break
-
     return results
 
 
 def get_realtime_search_context(user_text: str, mode: str) -> str:
-    """获取本轮实时搜索上下文，并做模式内缓存。"""
     if not should_trigger_realtime_search(user_text):
         return "本轮未触发实时搜索。"
-
-    search_query = (
-        f"小红书 {user_text} 爆款"
-        if mode == "personal"
-        else f"小红书 {user_text} 行业案例 爆款"
-    )
-
+    search_query = f"小红书 {user_text} 爆款" if mode == "personal" else f"小红书 {user_text} 行业案例 爆款"
     mode_cache_key = get_mode_key(mode, "search_cache")
     search_cache = st.session_state.get(mode_cache_key, {})
     if search_query in search_cache:
         return format_search_context(search_cache[search_query])
-
     results = search_hot_posts(search_query)
     search_cache[search_query] = results
     st.session_state[mode_cache_key] = search_cache
-
     if results:
         log_runtime(f"{MODE_META[mode]['label']}补充了 {len(results)} 条实时搜索线索。")
     else:
@@ -660,37 +620,27 @@ def call_chat_model(
     references_text: str,
     search_context: str,
 ) -> str:
-    """调用聊天模型。"""
     if not api_key.strip():
-        raise RuntimeError("请先在侧边栏为当前模型填写 API Key。")
-
+        raise RuntimeError("请先在侧边栏填写当前平台的 API Key。")
     model_info = get_selected_model_info(model_config, selected_model)
     api_url = str(model_info.get("api_base") or model_info.get("api_url", "")).strip()
     model_name = str(model_info.get("model") or model_info.get("model_name", "")).strip()
-
     if api_url.endswith("/"):
         api_url = f"{api_url}chat/completions"
-
     if not api_url or not model_name:
         raise RuntimeError("当前选中模型配置不完整，请检查 config/models.json。")
-
     payload = {
         "model": model_name,
         "messages": build_model_payload(mode, user_text, rules_text, references_text, search_context),
         "temperature": 0.7,
     }
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key.strip()}",
-    }
-
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key.strip()}"}
     req = request.Request(
         api_url,
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
         method="POST",
     )
-
     try:
         with request.urlopen(req, timeout=180) as response:
             raw = response.read().decode("utf-8")
@@ -707,124 +657,143 @@ def call_chat_model(
 
 
 def render_mode_switch() -> None:
-    """渲染工作/个人模式切换。"""
     st.subheader("模式切换")
     col1, col2 = st.columns(2)
-
     with col1:
-        if st.button(
-            "工作模式",
-            use_container_width=True,
-            type="primary" if st.session_state.mode == "work" else "secondary",
-        ):
+        if st.button("工作模式", use_container_width=True, type="primary" if st.session_state.mode == "work" else "secondary"):
             set_mode("work")
     with col2:
-        if st.button(
-            "个人模式",
-            use_container_width=True,
-            type="primary" if st.session_state.mode == "personal" else "secondary",
-        ):
+        if st.button("个人模式", use_container_width=True, type="primary" if st.session_state.mode == "personal" else "secondary"):
             set_mode("personal")
-
     st.caption(MODE_META[st.session_state.mode]["desc"])
 
 
 def render_model_selector() -> None:
-    """渲染模型选择下拉。"""
     st.subheader("模型选择")
     options = st.session_state.model_options
-    option_names = [item["name"] for item in options]
-    key_to_name = {item["key"]: item["name"] for item in options}
-    name_to_key = {item["name"]: item["key"] for item in options}
+    provider_options = st.session_state.provider_display_options
+    provider_by_model = {}
+    for provider_option in provider_options:
+        provider_models = get_provider_models(st.session_state.model_config, provider_option["provider"])
+        for model_key, _model_info in provider_models:
+            provider_by_model[model_key] = provider_option["name"]
 
-    current_name = key_to_name.get(st.session_state.selected_model, option_names[0])
-    selected_name = st.selectbox(
-        "选择模型",
-        options=option_names,
-        index=option_names.index(current_name),
-        label_visibility="collapsed",
-        key="model_selectbox",
-    )
-    new_key = name_to_key[selected_name]
-    if new_key != st.session_state.selected_model:
-        st.session_state.selected_model = new_key
-        sync_api_key_input_for_model()
+    provider_labels = [item["name"] for item in provider_options]
+    current_provider_label = provider_by_model.get(st.session_state.selected_model, provider_labels[0] if provider_labels else "")
+    if provider_labels:
+        selected_provider_label = st.selectbox(
+            "选择平台",
+            options=provider_labels,
+            index=provider_labels.index(current_provider_label),
+            label_visibility="collapsed",
+            key="provider_selectbox",
+        )
+        selected_provider = next(item for item in provider_options if item["name"] == selected_provider_label)
+        provider_models = get_provider_models(st.session_state.model_config, selected_provider["provider"])
+        model_name_to_key = {
+            str(model_info.get("label") or model_info.get("name") or model_key): model_key
+            for model_key, model_info in provider_models
+        }
+        model_labels = list(model_name_to_key.keys())
+        current_model_label = next(
+            (label for label, key in model_name_to_key.items() if key == st.session_state.selected_model),
+            model_labels[0],
+        )
+        selected_model_label = st.selectbox(
+            "选择模型",
+            options=model_labels,
+            index=model_labels.index(current_model_label),
+            key="model_selectbox",
+        )
+        new_key = model_name_to_key[selected_model_label]
+        if new_key != st.session_state.selected_model:
+            st.session_state.selected_model = new_key
+            sync_api_key_input_for_model()
+            if st.session_state.api_key_requires_manual_selection:
+                persist_default_model(new_key)
 
 
 def render_api_key_input(model_info: Dict[str, Any]) -> str:
-    """渲染 API Key 输入框，并自动识别模型。"""
     current_model = st.session_state.selected_model
     model_name = model_info.get("name", current_model)
     current_saved_key = resolve_api_key(current_model, model_info)
     expander_title = f"API Key（{'已配置' if current_saved_key else '未配置'}）"
-
     with st.expander(expander_title, expanded=False):
         col_input, col_action = st.columns([5, 1])
-
         with col_input:
             input_value = st.text_input(
                 f"{model_name} API Key",
                 key="api_key_input",
                 type="password",
-                placeholder="直接粘贴 API Key，系统会自动识别模型",
+                placeholder="直接粘贴 OpenAI 格式 API Key，系统会先自动验证平台",
                 label_visibility="collapsed",
             )
-
         with col_action:
             clear_clicked = st.button("清除", key=f"clear_api_key_{current_model}", use_container_width=True)
 
         if clear_clicked:
-            st.session_state.manual_api_keys[current_model] = ""
+            provider_key = get_provider_key(model_info)
+            for sibling_model_key, _sibling_info in get_provider_models(st.session_state.model_config, provider_key):
+                st.session_state.manual_api_keys[sibling_model_key] = ""
             persist_model_api_key(current_model, "")
             st.session_state.api_key_input = ""
-            st.session_state.api_key_status = f"已清除 {get_model_display_name(current_model)} 的 API Key"
+            st.session_state.api_key_status = f"已清除 {PROVIDER_LABELS.get(provider_key, model_name)} 平台的 API Key"
+            st.session_state.api_key_requires_manual_selection = False
             return ""
 
         normalized_input = input_value.strip()
         if not normalized_input:
-            st.session_state.manual_api_keys[current_model] = ""
+            provider_key = get_provider_key(model_info)
+            for sibling_model_key, _sibling_info in get_provider_models(st.session_state.model_config, provider_key):
+                st.session_state.manual_api_keys[sibling_model_key] = ""
             persist_model_api_key(current_model, "")
             st.session_state.api_key_status = ""
+            st.session_state.api_key_requires_manual_selection = False
             return resolve_api_key(current_model, model_info)
 
-        detected_model = detect_model_from_api_key(normalized_input, st.session_state.model_config)
-        target_model = detected_model or current_model
+        if st.session_state.api_key_requires_manual_selection:
+            provider_key = get_provider_key(model_info)
+            for sibling_model_key, _sibling_info in get_provider_models(st.session_state.model_config, provider_key):
+                st.session_state.manual_api_keys[sibling_model_key] = normalized_input
+            persist_model_api_key(current_model, normalized_input)
+            persist_default_model(current_model)
+            st.session_state.api_key_status = f"已按你手动选择的模型保存到 {PROVIDER_LABELS.get(provider_key, provider_key)} 平台"
+            return resolve_api_key(current_model, model_info)
 
-        st.session_state.manual_api_keys[target_model] = normalized_input
-        persist_model_api_key(target_model, normalized_input)
-
+        detected_model, requires_manual = detect_model_by_real_verification(normalized_input, st.session_state.model_config)
         if detected_model:
+            detected_info = get_selected_model_info(st.session_state.model_config, detected_model)
+            detected_provider = get_provider_key(detected_info)
+            for sibling_model_key, _sibling_info in get_provider_models(st.session_state.model_config, detected_provider):
+                st.session_state.manual_api_keys[sibling_model_key] = normalized_input
+            persist_model_api_key(detected_model, normalized_input)
             if st.session_state.selected_model != detected_model:
                 st.session_state.selected_model = detected_model
                 sync_api_key_input_for_model()
             persist_default_model(detected_model)
-            detected_name = get_model_display_name(detected_model)
-            st.session_state.api_key_status = f"已自动识别当前 Key 属于：{detected_name}"
-            return resolve_api_key(detected_model, get_selected_model_info(st.session_state.model_config, detected_model))
+            st.session_state.api_key_requires_manual_selection = False
+            st.session_state.api_key_status = f"已自动验证成功，当前 Key 属于：{PROVIDER_LABELS.get(detected_provider, detected_provider)}"
+            return resolve_api_key(detected_model, detected_info)
 
-        st.session_state.api_key_status = "未能自动识别该 Key，请手动选择模型后继续使用。"
-        return resolve_api_key(current_model, model_info)
+        provider_key = get_provider_key(model_info)
+        for sibling_model_key, _sibling_info in get_provider_models(st.session_state.model_config, provider_key):
+            st.session_state.manual_api_keys[sibling_model_key] = normalized_input
+        st.session_state.api_key_requires_manual_selection = True
+        st.session_state.api_key_status = "无法识别，请手动选择模型。选择后系统将按你选的平台直接保存并使用该 Key。"
+        return normalized_input
 
 
 def render_sidebar() -> str:
-    """渲染侧边栏。"""
     with st.sidebar:
         st.title("助手配置")
         render_mode_switch()
         render_model_selector()
-
-        selected_model_info = get_selected_model_info(
-            st.session_state.model_config,
-            st.session_state.selected_model,
-        )
+        selected_model_info = get_selected_model_info(st.session_state.model_config, st.session_state.selected_model)
         active_api_key = render_api_key_input(selected_model_info)
-        selected_model_info = get_selected_model_info(
-            st.session_state.model_config,
-            st.session_state.selected_model,
-        )
+        selected_model_info = get_selected_model_info(st.session_state.model_config, st.session_state.selected_model)
 
         if st.session_state.api_key_status:
-            if "未能自动识别" in st.session_state.api_key_status:
+            if "无法识别" in st.session_state.api_key_status:
                 st.warning(st.session_state.api_key_status)
             else:
                 st.success(st.session_state.api_key_status)
@@ -841,53 +810,28 @@ def render_sidebar() -> str:
         )
 
         with st.expander("当前模式身份档案", expanded=False):
-            st.text_area(
-                "identity_preview",
-                value=get_current_identity(st.session_state.mode),
-                height=160,
-                disabled=True,
-                label_visibility="collapsed",
-            )
-
+            st.text_area("identity_preview", value=get_current_identity(st.session_state.mode), height=160, disabled=True, label_visibility="collapsed")
         with st.expander("规律库摘要", expanded=False):
-            st.text_area(
-                "rules_summary",
-                value=st.session_state.rules_summary,
-                height=320,
-                disabled=True,
-                label_visibility="collapsed",
-            )
-
+            st.text_area("rules_summary", value=st.session_state.rules_summary, height=320, disabled=True, label_visibility="collapsed")
         with st.expander("运行状态", expanded=False):
             runtime_logs = "\n".join(st.session_state.runtime_logs[-12:]) if st.session_state.runtime_logs else "暂无日志"
-            st.text_area(
-                "runtime_logs",
-                value=runtime_logs,
-                height=160,
-                disabled=True,
-                label_visibility="collapsed",
-            )
-
+            st.text_area("runtime_logs", value=runtime_logs, height=160, disabled=True, label_visibility="collapsed")
     return active_api_key
 
 
 def render_chat_history(mode: str) -> None:
-    """渲染当前模式历史消息。"""
     for item in get_current_messages(mode):
         with st.chat_message("user" if item["role"] == "user" else "assistant"):
             st.markdown(item["content"])
 
 
 def handle_identity_instruction(mode: str, user_text: str) -> bool:
-    """处理身份更新指令。"""
     identity_update = parse_identity_update(user_text, mode)
     if not identity_update:
         return False
-
     target_mode, identity_text = identity_update
     if not identity_text:
         identity_text = user_text
-
     set_current_identity(target_mode, identity_text)
     result = build_identity_confirmation(target_mode, identity_text)
     append_mode_message(mode, "assistant", result)
@@ -900,19 +844,15 @@ def handle_identity_instruction(mode: str, user_text: str) -> bool:
 
 
 def handle_user_message(active_api_key: str) -> None:
-    """处理用户输入。"""
     mode = st.session_state.mode
-    user_text = st.chat_input("像聊天一样直接说：领导让我写一篇 XX 文案 / 我想做个账号 / 改标题 / 记住这个身份……")
+    user_text = st.chat_input("像聊天一样直接说：领导让我写一篇 XX 文案 / 我想做个账号 / 改标题 / 记住这个身份…")
     if not user_text:
         return
-
     append_mode_message(mode, "user", user_text)
     with st.chat_message("user"):
         st.markdown(user_text)
-
     if handle_identity_instruction(mode, user_text):
         return
-
     with st.chat_message("assistant"):
         with st.spinner("我先帮你判断方向，再整理成初稿..."):
             try:
@@ -930,7 +870,7 @@ def handle_user_message(active_api_key: str) -> None:
                 st.markdown(result)
                 append_mode_message(mode, "assistant", result)
                 save_mode_output(mode, result)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 error_text = f"生成失败：{exc}"
                 st.error(error_text)
                 append_mode_message(mode, "assistant", error_text)
@@ -938,22 +878,14 @@ def handle_user_message(active_api_key: str) -> None:
 
 
 def main() -> None:
-    """主入口。"""
-    st.set_page_config(
-        page_title="内容创作聊天助手",
-        page_icon="🧠",
-        layout="wide",
-    )
+    st.set_page_config(page_title="内容创作聊天助手", page_icon="📝", layout="wide")
     init_session_state()
     init_static_session_data()
-
     active_api_key = render_sidebar()
-
     mode = st.session_state.mode
     st.title("内容创作聊天助手")
     st.caption("像聊天一样输入任务或想法，系统会结合规律、样本和实时搜索，先判断方向，再给你可执行内容。")
     st.info(MODE_META[mode]["intro"])
-
     render_chat_history(mode)
     handle_user_message(active_api_key)
 
