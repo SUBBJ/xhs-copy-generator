@@ -25,6 +25,41 @@ MODEL_SECRET_KEYS = {
     "gpt_4o": ["OPENAI_API_KEY", "GPT_API_KEY", "openai_api_key"],
 }
 
+KEY_DETECTION_RULES = [
+    {
+        "model_key": "gpt_4o",
+        "label": "GPT-4o",
+        "patterns": [
+            r"^sk-proj-",
+            r"^sk-live-",
+            r"^sess-",
+            r"^fk",
+            r"^gpt-",
+        ],
+    },
+    {
+        "model_key": "deepseek_chat",
+        "label": "DeepSeek",
+        "patterns": [
+            r"^sk-[A-Za-z0-9]{30,40}$",
+        ],
+    },
+    {
+        "model_key": "gpt_4o",
+        "label": "GPT-4o",
+        "patterns": [
+            r"^sk-[A-Za-z0-9]{1,24}$",
+        ],
+    },
+    {
+        "model_key": "glm_4_flash",
+        "label": "智谱 GLM-4-Flash",
+        "patterns": [
+            r"^[A-Za-z0-9]{20,}$",
+        ],
+    },
+]
+
 MODE_META = {
     "work": {
         "label": "工作模式",
@@ -86,6 +121,17 @@ def save_model_config(model_config: Dict[str, Any]) -> None:
     )
     load_model_config.clear()
     read_text.clear()
+
+
+def persist_default_model(model_key: str) -> None:
+    """把当前识别出的模型保存为默认模型。"""
+    model_config = st.session_state.get("model_config") or load_model_config()
+    if model_config.get("default_model") == model_key:
+        return
+
+    model_config["default_model"] = model_key
+    save_model_config(model_config)
+    st.session_state.model_config = model_config
 
 
 @st.cache_data(show_spinner=False)
@@ -191,6 +237,29 @@ def persist_model_api_key(model_key: str, api_key: str) -> None:
     st.session_state.model_config = model_config
 
 
+def detect_model_from_api_key(api_key: str, model_config: Dict[str, Any]) -> Optional[str]:
+    """根据 API Key 特征自动识别模型。"""
+    normalized_key = api_key.strip()
+    if not normalized_key:
+        return None
+
+    enabled_models = model_config.get("models", {})
+    for rule in KEY_DETECTION_RULES:
+        model_key = rule["model_key"]
+        if model_key not in enabled_models:
+            continue
+        for pattern in rule["patterns"]:
+            if re.match(pattern, normalized_key):
+                return model_key
+    return None
+
+
+def get_model_display_name(model_key: str) -> str:
+    """获取模型展示名。"""
+    model_info = get_selected_model_info(st.session_state.model_config, model_key)
+    return str(model_info.get("name", model_key))
+
+
 def get_mode_prefix(mode: str) -> str:
     """获取模式前缀。"""
     return MODE_META[mode]["session_prefix"]
@@ -223,6 +292,8 @@ def init_session_state() -> None:
         st.session_state.manual_api_keys = {}
     if "runtime_logs" not in st.session_state:
         st.session_state.runtime_logs = []
+    if "api_key_status" not in st.session_state:
+        st.session_state.api_key_status = ""
 
     ensure_mode_state("work")
     ensure_mode_state("personal")
@@ -681,22 +752,58 @@ def render_model_selector() -> None:
 
 
 def render_api_key_input(model_info: Dict[str, Any]) -> str:
-    """渲染当前模型对应的 API Key 输入框。"""
+    """渲染 API Key 输入框，并自动识别模型。"""
     current_model = st.session_state.selected_model
     model_name = model_info.get("name", current_model)
+    current_saved_key = resolve_api_key(current_model, model_info)
+    expander_title = f"API Key（{'已配置' if current_saved_key else '未配置'}）"
 
-    st.subheader("API Key")
-    input_value = st.text_input(
-        f"{model_name} API Key",
-        key="api_key_input",
-        type="password",
-        placeholder="输入当前模型对应的 API Key",
-    )
+    with st.expander(expander_title, expanded=False):
+        col_input, col_action = st.columns([5, 1])
 
-    normalized_input = input_value.strip()
-    st.session_state.manual_api_keys[current_model] = normalized_input
-    persist_model_api_key(current_model, normalized_input)
-    return resolve_api_key(current_model, model_info)
+        with col_input:
+            input_value = st.text_input(
+                f"{model_name} API Key",
+                key="api_key_input",
+                type="password",
+                placeholder="直接粘贴 API Key，系统会自动识别模型",
+                label_visibility="collapsed",
+            )
+
+        with col_action:
+            clear_clicked = st.button("清除", key=f"clear_api_key_{current_model}", use_container_width=True)
+
+        if clear_clicked:
+            st.session_state.manual_api_keys[current_model] = ""
+            persist_model_api_key(current_model, "")
+            st.session_state.api_key_input = ""
+            st.session_state.api_key_status = f"已清除 {get_model_display_name(current_model)} 的 API Key"
+            return ""
+
+        normalized_input = input_value.strip()
+        if not normalized_input:
+            st.session_state.manual_api_keys[current_model] = ""
+            persist_model_api_key(current_model, "")
+            st.session_state.api_key_status = ""
+            return resolve_api_key(current_model, model_info)
+
+        detected_model = detect_model_from_api_key(normalized_input, st.session_state.model_config)
+        target_model = detected_model or current_model
+
+        st.session_state.manual_api_keys[target_model] = normalized_input
+        persist_model_api_key(target_model, normalized_input)
+
+        if detected_model:
+            if st.session_state.selected_model != detected_model:
+                st.session_state.selected_model = detected_model
+                sync_api_key_input_for_model()
+            persist_default_model(detected_model)
+            detected_name = get_model_display_name(detected_model)
+            st.session_state.api_key_status = f"已自动识别当前 Key 属于：{detected_name}"
+            return resolve_api_key(detected_model, get_selected_model_info(st.session_state.model_config, detected_model))
+
+        st.session_state.api_key_status = "未能自动识别该 Key，请手动选择模型后继续使用。"
+        return resolve_api_key(current_model, model_info)
 
 
 def render_sidebar() -> str:
@@ -711,6 +818,16 @@ def render_sidebar() -> str:
             st.session_state.selected_model,
         )
         active_api_key = render_api_key_input(selected_model_info)
+        selected_model_info = get_selected_model_info(
+            st.session_state.model_config,
+            st.session_state.selected_model,
+        )
+
+        if st.session_state.api_key_status:
+            if "未能自动识别" in st.session_state.api_key_status:
+                st.warning(st.session_state.api_key_status)
+            else:
+                st.success(st.session_state.api_key_status)
 
         st.subheader("当前状态")
         st.markdown(
