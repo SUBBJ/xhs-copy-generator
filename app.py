@@ -308,14 +308,14 @@ def render_sidebar(rules_summary: str, deconstruction_results: List[Dict[str, st
 """
         )
 
-        st.subheader("规律库摘要")
-        st.text_area(
-            "规律摘要",
-            value=rules_summary,
-            height=320,
-            disabled=True,
-            label_visibility="collapsed",
-        )
+        with st.expander("规律库摘要", expanded=False):
+            st.text_area(
+                "规律摘要",
+                value=rules_summary,
+                height=320,
+                disabled=True,
+                label_visibility="collapsed",
+            )
 
 
 def render_chat_history() -> None:
