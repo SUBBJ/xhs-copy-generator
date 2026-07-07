@@ -1,37 +1,48 @@
 import json
-import os
-import re
 from pathlib import Path
 from typing import Any, Dict, List
 from urllib import error, request
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 
 PROJECT_ROOT = Path(".")
+PROMPTS_DIR = PROJECT_ROOT / "prompts"
+CONFIG_DIR = PROJECT_ROOT / "config"
 DECONSTRUCT_DIR = PROJECT_ROOT / "02-拆解结果库"
 RULES_FILE = PROJECT_ROOT / "03-规律库" / "规律汇总报告.md"
 
-DEEPSEEK_API_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-
 
 def read_text(file_path: Path) -> str:
-    """统一读取文本文件，兼容 UTF-8 BOM。"""
+    """读取 UTF-8 文本，兼容 BOM。"""
     return file_path.read_text(encoding="utf-8-sig")
 
 
+def load_prompt(file_name: str) -> str:
+    """读取外部提示词文件。"""
+    file_path = PROMPTS_DIR / file_name
+    if not file_path.exists():
+        return ""
+    return read_text(file_path)
+
+
+def load_model_config() -> Dict[str, Any]:
+    """读取模型配置。"""
+    config_path = CONFIG_DIR / "models.json"
+    if not config_path.exists():
+        return {}
+    return json.loads(read_text(config_path))
+
+
 def load_rules_report() -> str:
-    """读取规律汇总报告全文。"""
+    """读取规律汇总报告。"""
     if not RULES_FILE.exists():
-        return "未找到规律汇总报告，请确认 03-规律库/规律汇总报告.md 已存在。"
+        return "未找到规律汇总报告。"
     return read_text(RULES_FILE)
 
 
 def build_rules_summary(report_text: str) -> str:
-    """提取适合在左侧展示的规律摘要。"""
+    """提取左侧展示用摘要。"""
     wanted_headers = [
         "## 3. 共性规律提炼",
         "## 5. 可复用的爆款公式总结",
@@ -49,11 +60,11 @@ def build_rules_summary(report_text: str) -> str:
 
     if sections:
         return "\n\n".join(sections)
-    return report_text[:1500]
+    return report_text[:1800]
 
 
 def load_deconstruction_results() -> List[Dict[str, str]]:
-    """读取拆解结果库中的 Markdown 文件。"""
+    """读取拆解结果库。"""
     results: List[Dict[str, str]] = []
     if not DECONSTRUCT_DIR.exists():
         return results
@@ -70,135 +81,179 @@ def load_deconstruction_results() -> List[Dict[str, str]]:
     return results
 
 
-def build_reference_digest(results: List[Dict[str, str]]) -> str:
-    """把多篇拆解结果压缩成更适合送给模型的参考摘要。"""
+def build_reference_digest(results: List[Dict[str, str]], max_items: int = 3) -> str:
+    """压缩拆解样本，减少上下文噪音。"""
     digests: List[str] = []
 
-    for item in results:
+    for item in results[:max_items]:
         content = item["content"]
-        sample_match = re.search(r"对应样本[：:]\s*(.+)", content)
-        summary_match = re.search(r"## 十四、结构化提炼(.*?)(## 十五、可靠性说明|$)", content, re.S)
-
-        sample_name = sample_match.group(1).strip() if sample_match else item["file_name"]
-        summary_text = summary_match.group(1).strip() if summary_match else content[:800]
-        digests.append(f"### 参考样本：{sample_name}\n{summary_text}")
+        digests.append(f"### 参考拆解：{item['file_name']}\n{content[:1800]}")
 
     return "\n\n".join(digests)
 
 
-def extract_json_from_text(text: str) -> Dict[str, Any]:
-    """兼容模型返回前后夹杂解释文本的情况，尽量提取 JSON。"""
-    cleaned = text.strip()
-    if cleaned.startswith("{") and cleaned.endswith("}"):
-        return json.loads(cleaned)
+def init_session_state() -> None:
+    """初始化会话状态。"""
+    defaults = {
+        "mode": "work",
+        "messages": [],
+        "draft_history": [],
+        "api_key": "",
+        "latest_output": "",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-    match = re.search(r"\{.*\}", cleaned, re.S)
-    if not match:
-        raise ValueError("模型返回中未找到合法 JSON。")
-    return json.loads(match.group(0))
+
+def set_mode(mode: str) -> None:
+    """切换模式。"""
+    st.session_state.mode = mode
 
 
-def build_prompt(topic: str, rules_text: str, references_text: str) -> str:
-    """构造文案生成 Prompt。"""
+def is_edit_request(user_text: str) -> bool:
+    """粗略判断是否是连续修改请求。"""
+    keywords = [
+        "改标题",
+        "换开头",
+        "改开头",
+        "缩短",
+        "压缩",
+        "重写",
+        "拼一下",
+        "融合",
+        "合并",
+        "像我一点",
+        "太官方",
+        "这个可以了",
+        "再来一版",
+        "优化一下",
+    ]
+    return any(keyword in user_text for keyword in keywords)
+
+
+def build_system_prompt(mode: str) -> str:
+    """拼装系统提示词。"""
+    if mode == "work":
+        return "\n\n".join(
+            [
+                load_prompt("system_work.md"),
+                load_prompt("task_work_delivery.md"),
+                load_prompt("task_iterate_edit.md"),
+            ]
+        ).strip()
+
+    return "\n\n".join(
+        [
+            load_prompt("system_personal.md"),
+            load_prompt("task_personal_startup.md"),
+            load_prompt("task_iterate_edit.md"),
+        ]
+    ).strip()
+
+
+def build_user_prompt(
+    user_text: str,
+    mode: str,
+    rules_text: str,
+    references_text: str,
+) -> str:
+    """构造本轮用户提示。"""
+    mode_name = "工作模式" if mode == "work" else "个人模式"
+    latest_output = st.session_state.get("latest_output", "")
+    edit_hint = "这是一次连续修改请求，请优先在已有版本基础上局部迭代。" if is_edit_request(user_text) else "这是一次新的内容请求，请先理解意图再输出。"
+
     return f"""
-你现在是「小红书文案生成器」，专门服务于：
-- 工业制造业
-- 文旅装备
-- B端场景
-- 工厂源头 / 项目方案 / 场景升级 / 产品讲解
+当前模式：{mode_name}
 
-你的任务：基于【用户输入主题】、【已有拆解结果】、【规律汇总报告】，生成一篇可直接使用的小红书笔记文案。
+用户输入：
+{user_text}
 
-【用户输入主题】
-{topic}
+任务判断：
+{edit_hint}
 
-【规律汇总报告】
-{rules_text}
+当前已沉淀规律：
+{rules_text[:3000]}
 
-【拆解结果参考】
-{references_text}
+当前可参考拆解：
+{references_text[:3500]}
 
-请严格遵守以下生成要求：
-1. 风格必须符合工业制造业 / 文旅装备 / B端场景赛道
-2. 开头 3 行内必须抓住注意力
-3. 正文按照“痛点切入 → 解决方案 → 价值证明 → 行动引导”推进
-4. 评论区引导必须自然承接询盘转化
-5. 不要空泛鸡汤，不要写泛生活类口吻
-6. 不要编造具体成交数据、客户案例和价格
-7. 输出必须是 JSON，不要输出任何额外解释
+最近一版输出（如有）：
+{latest_output[:2500] if latest_output else "暂无"}
 
-请按下面 JSON 结构输出：
-{{
-  "topic": "主题",
-  "titles": ["标题1", "标题2", "标题3"],
-  "body": "完整正文，500-800字",
-  "image_suggestions": [
-    "第1张图建议",
-    "第2张图建议",
-    "第3张图建议",
-    "第4张图建议",
-    "第5张图建议",
-    "第6张图建议"
-  ],
-  "comment_guides": [
-    {{
-      "preset_comment": "预设评论1",
-      "author_reply": "作者回复1"
-    }},
-    {{
-      "preset_comment": "预设评论2",
-      "author_reply": "作者回复2"
-    }},
-    {{
-      "preset_comment": "预设评论3",
-      "author_reply": "作者回复3"
-    }}
-  ],
-  "hashtags": ["标签1", "标签2", "标签3", "标签4", "标签5", "标签6", "标签7", "标签8"]
-}}
+请注意：
+1. 像聊天助手一样自然回应。
+2. 如果是工作模式，优先输出可交付成品，并补充简短汇报说明。
+3. 如果是个人模式，优先围绕用户真实条件做内容定位、起号规划和执行方案。
+4. 如果用户是在改稿，不要整篇推翻，优先局部修改。
+5. 不要让用户填表，直接理解并帮他往前推进。
 """.strip()
 
 
-def call_deepseek(prompt: str) -> Dict[str, Any]:
-    """调用 DeepSeek API 生成文案。"""
-    if not DEEPSEEK_API_KEY:
-        raise RuntimeError("未检测到 DEEPSEEK_API_KEY 环境变量。")
+def build_model_payload(mode: str, user_text: str, rules_text: str, references_text: str) -> List[Dict[str, str]]:
+    """生成发给模型的消息列表。"""
+    system_prompt = build_system_prompt(mode)
+    messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+
+    history = st.session_state.messages[-8:]
+    for item in history:
+        messages.append({"role": item["role"], "content": item["content"]})
+
+    messages.append(
+        {
+            "role": "user",
+            "content": build_user_prompt(user_text, mode, rules_text, references_text),
+        }
+    )
+    return messages
+
+
+def call_chat_model(
+    api_key: str,
+    model_config: Dict[str, Any],
+    mode: str,
+    user_text: str,
+    rules_text: str,
+    references_text: str,
+) -> str:
+    """调用聊天模型。"""
+    if not api_key.strip():
+        raise RuntimeError("请先在页面左侧填写 API Key。")
+
+    default_model = model_config.get("default_model", "deepseek_chat")
+    model_info = model_config.get("models", {}).get(default_model, {})
+    api_url = model_info.get("api_url", "").strip()
+    model_name = model_info.get("model_name", "").strip()
+
+    if not api_url or not model_name:
+        raise RuntimeError("模型配置不完整，请检查 config/models.json。")
 
     payload = {
-        "model": DEEPSEEK_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": "你是一个严谨的小红书文案生成助手，必须只输出合法 JSON。",
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
+        "model": model_name,
+        "messages": build_model_payload(mode, user_text, rules_text, references_text),
         "temperature": 0.7,
     }
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {api_key.strip()}",
     }
 
     req = request.Request(
-        DEEPSEEK_API_URL,
+        api_url,
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
         method="POST",
     )
 
     try:
-        with request.urlopen(req, timeout=120) as response:
+        with request.urlopen(req, timeout=180) as response:
             raw = response.read().decode("utf-8")
         data = json.loads(raw)
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         if not content:
             raise RuntimeError("模型返回为空。")
-        return extract_json_from_text(content)
+        return content
     except error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="ignore")
         raise RuntimeError(f"API 调用失败：HTTP {exc.code} {body}") from exc
@@ -206,152 +261,131 @@ def call_deepseek(prompt: str) -> Dict[str, Any]:
         raise RuntimeError(f"网络连接失败：{exc.reason}") from exc
 
 
-def build_markdown_output(result: Dict[str, Any]) -> str:
-    """把结构化结果转成适合复制的 Markdown。"""
-    lines: List[str] = []
-    lines.append(f"# 主题\n{result.get('topic', '')}\n")
+def render_mode_switch() -> None:
+    """渲染模式切换。"""
+    st.subheader("模式切换")
+    col1, col2 = st.columns(2)
 
-    lines.append("## 标题（3个版本）")
-    for index, title in enumerate(result.get("titles", []), start=1):
-        lines.append(f"{index}. {title}")
-    lines.append("")
+    work_type = "primary" if st.session_state.mode == "work" else "secondary"
+    personal_type = "primary" if st.session_state.mode == "personal" else "secondary"
 
-    lines.append("## 正文")
-    lines.append(result.get("body", ""))
-    lines.append("")
+    with col1:
+        if st.button("工作模式", use_container_width=True, type=work_type):
+            set_mode("work")
+    with col2:
+        if st.button("个人模式", use_container_width=True, type=personal_type):
+            set_mode("personal")
 
-    lines.append("## 配图建议")
-    for index, item in enumerate(result.get("image_suggestions", []), start=1):
-        lines.append(f"{index}. {item}")
-    lines.append("")
-
-    lines.append("## 评论区引导话术")
-    for index, item in enumerate(result.get("comment_guides", []), start=1):
-        lines.append(f"### 预设评论{index}")
-        lines.append(f"- 用户评论：{item.get('preset_comment', '')}")
-        lines.append(f"- 作者回复：{item.get('author_reply', '')}")
-        lines.append("")
-
-    lines.append("## 标签推荐")
-    lines.append(" ".join(result.get("hashtags", [])))
-    lines.append("")
-    return "\n".join(lines).strip()
-
-
-def render_copy_button(text: str) -> None:
-    """渲染一键复制按钮。"""
-    safe_text = json.dumps(text)
-    components.html(
-        f"""
-        <div style="margin-top: 8px; margin-bottom: 12px;">
-            <button
-                onclick='navigator.clipboard.writeText({safe_text}); this.innerText="已复制";'
-                style="
-                    background:#111827;
-                    color:white;
-                    border:none;
-                    padding:10px 16px;
-                    border-radius:8px;
-                    cursor:pointer;
-                    font-size:14px;
-                "
-            >
-                一键复制文案
-            </button>
-        </div>
-        """,
-        height=60,
+    mode_desc = (
+        "适合领导任务、文案交付、汇报说明、对外可提交内容。"
+        if st.session_state.mode == "work"
+        else "适合起号规划、内容方向、个人IP、变现路径、长期策划。"
     )
+    st.caption(mode_desc)
 
 
-st.set_page_config(
-    page_title="小红书文案生成器",
-    page_icon="📝",
-    layout="wide",
-)
+def render_sidebar(rules_summary: str, deconstruction_results: List[Dict[str, str]]) -> None:
+    """渲染侧边栏。"""
+    with st.sidebar:
+        st.title("助手配置")
+        render_mode_switch()
 
-st.title("小红书文案生成器")
-st.caption("基于拆解结果库 + 规律库，自动生成工业制造业 / 文旅装备 / B端场景小红书文案")
+        st.subheader("API Key")
+        st.session_state.api_key = st.text_input(
+            "直接在这里填 Key",
+            value=st.session_state.api_key,
+            type="password",
+            placeholder="输入 DeepSeek API Key",
+        )
 
-rules_text = load_rules_report()
-rules_summary = build_rules_summary(rules_text)
-deconstruction_results = load_deconstruction_results()
-
-left_col, right_col = st.columns([1, 2], gap="large")
-
-with left_col:
-    st.subheader("规律库摘要")
-    st.text_area(
-        "来自 03-规律库/规律汇总报告.md",
-        value=rules_summary,
-        height=700,
-        disabled=True,
-        label_visibility="collapsed",
-    )
-
-with right_col:
-    st.subheader("输入主题")
-    topic = st.text_input(
-        "请输入想写的主题",
-        value="工业制造业转型做文旅场景",
-        placeholder="例如：太空舱民宿选购避坑指南",
-    )
-
-    st.markdown(
-        f"""
-**当前参考数据**
-- 拆解结果数：`{len(deconstruction_results)}` 篇
-- 规律报告：`{"已加载" if rules_text else "未加载"}`
-- DeepSeek Key：`{"已检测到" if DEEPSEEK_API_KEY else "未检测到"}`
+        st.subheader("当前状态")
+        st.markdown(
+            f"""
+- 当前模式：`{"工作模式" if st.session_state.mode == "work" else "个人模式"}`
+- 参考拆解：`{len(deconstruction_results)}` 篇
+- 规律报告：`已加载`
+- API Key：`{"已填写" if st.session_state.api_key else "未填写"}`
 """
+        )
+
+        st.subheader("规律库摘要")
+        st.text_area(
+            "规律摘要",
+            value=rules_summary,
+            height=320,
+            disabled=True,
+            label_visibility="collapsed",
+        )
+
+
+def render_chat_history() -> None:
+    """渲染聊天记录。"""
+    for item in st.session_state.messages:
+        with st.chat_message("user" if item["role"] == "user" else "assistant"):
+            st.markdown(item["content"])
+
+
+def handle_user_message(rules_text: str, references_text: str, model_config: Dict[str, Any]) -> None:
+    """处理用户输入。"""
+    user_text = st.chat_input("直接像聊天一样说：领导让我写一篇文案 / 我想做个账号 / 改标题 / 换开头...")
+    if not user_text:
+        return
+
+    st.session_state.messages.append({"role": "user", "content": user_text})
+    with st.chat_message("user"):
+        st.markdown(user_text)
+
+    with st.chat_message("assistant"):
+        with st.spinner("正在帮你整理方案..."):
+            try:
+                result = call_chat_model(
+                    api_key=st.session_state.api_key,
+                    model_config=model_config,
+                    mode=st.session_state.mode,
+                    user_text=user_text,
+                    rules_text=rules_text,
+                    references_text=references_text,
+                )
+                st.markdown(result)
+                st.session_state.messages.append({"role": "assistant", "content": result})
+                st.session_state.latest_output = result
+                st.session_state.draft_history.append(result)
+            except Exception as exc:  # noqa: BLE001
+                error_text = f"生成失败：{exc}"
+                st.error(error_text)
+                st.session_state.messages.append({"role": "assistant", "content": error_text})
+
+
+def main() -> None:
+    """主入口。"""
+    st.set_page_config(
+        page_title="内容创作聊天助手",
+        page_icon="🧠",
+        layout="wide",
     )
+    init_session_state()
 
-    if st.button("生成文案", type="primary", use_container_width=True):
-        if not topic.strip():
-            st.error("请输入主题后再生成。")
-        elif not deconstruction_results:
-            st.error("未读取到 02-拆解结果库 中的拆解结果。")
-        elif not rules_text:
-            st.error("未读取到 03-规律库/规律汇总报告.md。")
-        elif not DEEPSEEK_API_KEY:
-            st.error("未检测到 DEEPSEEK_API_KEY 环境变量，无法调用 DeepSeek API。")
-        else:
-            with st.spinner("正在生成文案，请稍等..."):
-                try:
-                    references_text = build_reference_digest(deconstruction_results)
-                    prompt = build_prompt(topic.strip(), rules_text, references_text)
-                    result = call_deepseek(prompt)
-                    markdown_output = build_markdown_output(result)
+    rules_text = load_rules_report()
+    rules_summary = build_rules_summary(rules_text)
+    deconstruction_results = load_deconstruction_results()
+    references_text = build_reference_digest(deconstruction_results)
+    model_config = load_model_config()
 
-                    st.success("文案生成成功")
+    render_sidebar(rules_summary, deconstruction_results)
 
-                    st.markdown("## 标题（3个版本）")
-                    for index, title in enumerate(result.get("titles", []), start=1):
-                        st.markdown(f"{index}. {title}")
+    st.title("内容创作聊天助手")
+    st.caption("像聊天一样输入任务或想法，系统自动帮你做策划、起号、写稿和连续改稿。")
 
-                    st.markdown("## 正文")
-                    st.write(result.get("body", ""))
+    intro = (
+        "你现在在【工作模式】。可以直接说：领导让我写一篇XX主题文案。"
+        if st.session_state.mode == "work"
+        else "你现在在【个人模式】。可以直接说：我想做个账号，我有一辆车、单休、人比较实在。"
+    )
+    st.info(intro)
 
-                    st.markdown("## 配图建议")
-                    for index, item in enumerate(result.get("image_suggestions", []), start=1):
-                        st.markdown(f"{index}. {item}")
+    render_chat_history()
+    handle_user_message(rules_text, references_text, model_config)
 
-                    st.markdown("## 评论区引导话术")
-                    for index, item in enumerate(result.get("comment_guides", []), start=1):
-                        st.markdown(f"**预设评论{index}**")
-                        st.markdown(f"- 用户评论：{item.get('preset_comment', '')}")
-                        st.markdown(f"- 作者回复：{item.get('author_reply', '')}")
 
-                    st.markdown("## 标签推荐")
-                    st.write(" ".join(result.get("hashtags", [])))
-
-                    st.markdown("## 可复制 Markdown")
-                    render_copy_button(markdown_output)
-                    st.text_area(
-                        "生成结果",
-                        value=markdown_output,
-                        height=420,
-                        label_visibility="collapsed",
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    st.error(f"生成失败：{exc}")
+if __name__ == "__main__":
+    main()
