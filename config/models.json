@@ -1,0 +1,26 @@
+{
+  "default_model": "deepseek_chat",
+  "models": {
+    "deepseek_chat": {
+      "label": "DeepSeek Chat",
+      "provider": "deepseek",
+      "api_url": "https://api.deepseek.com/chat/completions",
+      "model_name": "deepseek-chat",
+      "enabled": true
+    },
+    "glm_4_flash": {
+      "label": "GLM-4-Flash",
+      "provider": "zhipu",
+      "api_url": "",
+      "model_name": "glm-4-flash",
+      "enabled": false
+    },
+    "gpt_4o": {
+      "label": "GPT-4o",
+      "provider": "openai_compatible",
+      "api_url": "",
+      "model_name": "gpt-4o",
+      "enabled": false
+    }
+  }
+}
