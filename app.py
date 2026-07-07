@@ -18,6 +18,12 @@ MODEL_LABELS = {
     "gpt_4o": "GPT-4o",
 }
 
+MODEL_SECRET_KEYS = {
+    "deepseek_chat": ["DEEPSEEK_API_KEY", "deepseek_api_key"],
+    "glm_4_flash": ["ZHIPU_API_KEY", "BIGMODEL_API_KEY", "zhipu_api_key"],
+    "gpt_4o": ["OPENAI_API_KEY", "GPT_API_KEY", "openai_api_key"],
+}
+
 
 @st.cache_data(show_spinner=False)
 def read_text(file_path: Path) -> str:
@@ -120,14 +126,36 @@ def get_selected_model_info(model_config: Dict[str, Any], selected_model: str) -
     return model_config.get("models", {}).get(selected_model, {})
 
 
+def get_secret_api_key(model_key: str) -> str:
+    """按模型从 Streamlit secrets 读取对应 Key。"""
+    for secret_name in MODEL_SECRET_KEYS.get(model_key, []):
+        if secret_name in st.secrets:
+            return str(st.secrets[secret_name]).strip()
+    return ""
+
+
+def resolve_api_key(model_key: str, model_info: Dict[str, Any]) -> str:
+    """按优先级决定当前模型要用哪个 Key。"""
+    manual_keys = st.session_state.get("manual_api_keys", {})
+    manual_key = str(manual_keys.get(model_key, "")).strip()
+    if manual_key:
+        return manual_key
+
+    secret_key = get_secret_api_key(model_key)
+    if secret_key:
+        return secret_key
+
+    return str(model_info.get("api_key", "")).strip()
+
+
 def init_session_state() -> None:
     """初始化会话状态。"""
     defaults = {
         "mode": "work",
         "messages": [],
         "draft_history": [],
-        "api_key": "",
         "latest_output": "",
+        "manual_api_keys": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -155,6 +183,18 @@ def init_static_session_data() -> None:
     valid_keys = [item["key"] for item in st.session_state.model_options]
     if "selected_model" not in st.session_state or st.session_state.selected_model not in valid_keys:
         st.session_state.selected_model = default_model if default_model in valid_keys else valid_keys[0]
+
+    current_model = st.session_state.selected_model
+    current_info = get_selected_model_info(st.session_state.model_config, current_model)
+    if "api_key_input" not in st.session_state:
+        st.session_state.api_key_input = resolve_api_key(current_model, current_info)
+
+
+def sync_api_key_input_for_model() -> None:
+    """切换模型时，把输入框同步成该模型当前有效 Key。"""
+    current_model = st.session_state.selected_model
+    current_info = get_selected_model_info(st.session_state.model_config, current_model)
+    st.session_state.api_key_input = resolve_api_key(current_model, current_info)
 
 
 def set_mode(mode: str) -> None:
@@ -275,13 +315,16 @@ def call_chat_model(
 ) -> str:
     """调用聊天模型。"""
     if not api_key.strip():
-        raise RuntimeError("请先在页面左侧填写 API Key。")
+        raise RuntimeError("请先为当前模型填写 API Key。")
 
     model_info = get_selected_model_info(model_config, selected_model)
     api_url = model_info.get("api_base") or model_info.get("api_url", "")
     model_name = model_info.get("model") or model_info.get("model_name", "")
     api_url = api_url.strip()
     model_name = model_name.strip()
+
+    if api_url.endswith("/"):
+        api_url = f"{api_url}chat/completions"
 
     if not api_url or not model_name:
         raise RuntimeError("当前选中模型配置不完整，请检查 config/models.json。")
@@ -356,30 +399,44 @@ def render_model_selector() -> None:
         options=option_names,
         index=option_names.index(current_name),
         label_visibility="collapsed",
+        key="model_selectbox",
     )
-    st.session_state.selected_model = name_to_key[selected_name]
+    new_key = name_to_key[selected_name]
+    if new_key != st.session_state.selected_model:
+        st.session_state.selected_model = new_key
+        sync_api_key_input_for_model()
 
 
-def render_sidebar(rules_summary: str, deconstruction_results: List[Dict[str, str]]) -> None:
+def render_api_key_input(model_info: Dict[str, Any]) -> str:
+    """渲染当前模型对应的 API Key 输入框。"""
+    current_model = st.session_state.selected_model
+    model_name = MODEL_LABELS.get(current_model) or model_info.get("name") or model_info.get("label") or current_model
+
+    st.subheader("API Key")
+    input_value = st.text_input(
+        f"{model_name} API Key",
+        key="api_key_input",
+        type="password",
+        placeholder="输入当前模型对应的 API Key",
+    )
+
+    st.session_state.manual_api_keys[current_model] = input_value.strip()
+    return resolve_api_key(current_model, model_info)
+
+
+def render_sidebar(rules_summary: str, deconstruction_results: List[Dict[str, str]]) -> str:
     """渲染侧边栏。"""
     with st.sidebar:
         st.title("助手配置")
         render_mode_switch()
         render_model_selector()
 
-        st.subheader("API Key")
-        st.session_state.api_key = st.text_input(
-            "直接在这里填 Key",
-            value=st.session_state.api_key,
-            type="password",
-            placeholder="输入通用 API Key",
-        )
-
         selected_model_info = get_selected_model_info(
             st.session_state.model_config,
             st.session_state.selected_model,
         )
         selected_model_name = MODEL_LABELS.get(st.session_state.selected_model) or selected_model_info.get("name") or selected_model_info.get("label") or st.session_state.selected_model
+        active_api_key = render_api_key_input(selected_model_info)
 
         st.subheader("当前状态")
         st.markdown(
@@ -388,7 +445,7 @@ def render_sidebar(rules_summary: str, deconstruction_results: List[Dict[str, st
 - 当前模型：`{selected_model_name}`
 - 参考拆解：`{len(deconstruction_results)}` 篇
 - 规律报告：`已加载`
-- API Key：`{"已填写" if st.session_state.api_key else "未填写"}`
+- API Key：`{"已填写" if active_api_key else "未填写"}`
 """
         )
 
@@ -401,6 +458,8 @@ def render_sidebar(rules_summary: str, deconstruction_results: List[Dict[str, st
                 label_visibility="collapsed",
             )
 
+    return active_api_key
+
 
 def render_chat_history() -> None:
     """渲染聊天记录。"""
@@ -409,7 +468,12 @@ def render_chat_history() -> None:
             st.markdown(item["content"])
 
 
-def handle_user_message(rules_text: str, references_text: str, model_config: Dict[str, Any]) -> None:
+def handle_user_message(
+    rules_text: str,
+    references_text: str,
+    model_config: Dict[str, Any],
+    active_api_key: str,
+) -> None:
     """处理用户输入。"""
     user_text = st.chat_input(
         "直接像聊天一样说：领导让我写一篇XX主题文案 / 我想做个账号 / 改标题 / 换开头..."
@@ -425,7 +489,7 @@ def handle_user_message(rules_text: str, references_text: str, model_config: Dic
         with st.spinner("正在帮你整理方案..."):
             try:
                 result = call_chat_model(
-                    api_key=st.session_state.api_key,
+                    api_key=active_api_key,
                     model_config=model_config,
                     selected_model=st.session_state.selected_model,
                     mode=st.session_state.mode,
@@ -459,7 +523,7 @@ def main() -> None:
     references_text = st.session_state.references_text
     model_config = st.session_state.model_config
 
-    render_sidebar(rules_summary, deconstruction_results)
+    active_api_key = render_sidebar(rules_summary, deconstruction_results)
 
     st.title("内容创作聊天助手")
     st.caption("像聊天一样输入任务或想法，系统自动帮你做策划、起号、写稿和连续改稿。")
@@ -472,7 +536,7 @@ def main() -> None:
     st.info(intro)
 
     render_chat_history()
-    handle_user_message(rules_text, references_text, model_config)
+    handle_user_message(rules_text, references_text, model_config, active_api_key)
 
 
 if __name__ == "__main__":
