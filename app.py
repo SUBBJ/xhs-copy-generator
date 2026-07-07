@@ -77,6 +77,17 @@ def load_model_config() -> Dict[str, Any]:
     return json.loads(read_text(config_path))
 
 
+def save_model_config(model_config: Dict[str, Any]) -> None:
+    """写回模型配置，并刷新缓存。"""
+    config_path = CONFIG_DIR / "models.json"
+    config_path.write_text(
+        json.dumps(model_config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    load_model_config.clear()
+    read_text.clear()
+
+
 @st.cache_data(show_spinner=False)
 def load_rules_report() -> str:
     """读取规律汇总报告。"""
@@ -148,20 +159,6 @@ def get_selected_model_info(model_config: Dict[str, Any], selected_model: str) -
     return model_config.get("models", {}).get(selected_model, {})
 
 
-def get_secret_api_key(model_key: str) -> str:
-    """从 secrets 中按模型读取默认 API Key。"""
-    try:
-        secrets_dict = dict(st.secrets)
-    except Exception:  # noqa: BLE001
-        return ""
-
-    for secret_name in MODEL_SECRET_KEYS.get(model_key, []):
-        value = str(secrets_dict.get(secret_name, "")).strip()
-        if value:
-            return value
-    return ""
-
-
 def get_config_api_key(model_info: Dict[str, Any]) -> str:
     """从配置文件里读取回退 API Key。"""
     return str(model_info.get("api_key", "")).strip()
@@ -174,11 +171,24 @@ def resolve_api_key(model_key: str, model_info: Dict[str, Any]) -> str:
     if manual_key:
         return manual_key
 
-    secret_key = get_secret_api_key(model_key)
-    if secret_key:
-        return secret_key
-
     return get_config_api_key(model_info)
+
+
+def persist_model_api_key(model_key: str, api_key: str) -> None:
+    """把当前模型的 API Key 持久化到配置文件。"""
+    model_config = st.session_state.get("model_config") or load_model_config()
+    models = model_config.get("models", {})
+    if model_key not in models:
+        return
+
+    normalized_key = api_key.strip()
+    current_key = str(models[model_key].get("api_key", "")).strip()
+    if current_key == normalized_key:
+        return
+
+    models[model_key]["api_key"] = normalized_key
+    save_model_config(model_config)
+    st.session_state.model_config = model_config
 
 
 def get_mode_prefix(mode: str) -> str:
@@ -240,9 +250,13 @@ def init_static_session_data() -> None:
 
     for model_option in st.session_state.model_options:
         model_key = model_option["key"]
-        if model_key not in st.session_state.manual_api_keys:
-            model_info = get_selected_model_info(st.session_state.model_config, model_key)
-            saved_key = get_secret_api_key(model_key) or get_config_api_key(model_info)
+        model_info = get_selected_model_info(st.session_state.model_config, model_key)
+        config_key = get_config_api_key(model_info)
+        current_manual = str(st.session_state.manual_api_keys.get(model_key, "")).strip()
+        if config_key and current_manual != config_key:
+            st.session_state.manual_api_keys[model_key] = config_key
+        elif model_key not in st.session_state.manual_api_keys:
+            saved_key = get_config_api_key(model_info)
             st.session_state.manual_api_keys[model_key] = saved_key
 
     if "api_key_input" not in st.session_state:
@@ -679,7 +693,9 @@ def render_api_key_input(model_info: Dict[str, Any]) -> str:
         placeholder="输入当前模型对应的 API Key",
     )
 
-    st.session_state.manual_api_keys[current_model] = input_value.strip()
+    normalized_input = input_value.strip()
+    st.session_state.manual_api_keys[current_model] = normalized_input
+    persist_model_api_key(current_model, normalized_input)
     return resolve_api_key(current_model, model_info)
 
 
