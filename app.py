@@ -13,11 +13,13 @@ DECONSTRUCT_DIR = PROJECT_ROOT / "02-拆解结果库"
 RULES_FILE = PROJECT_ROOT / "03-规律库" / "规律汇总报告.md"
 
 
+@st.cache_data(show_spinner=False)
 def read_text(file_path: Path) -> str:
     """读取 UTF-8 文本，兼容 BOM。"""
     return file_path.read_text(encoding="utf-8-sig")
 
 
+@st.cache_data(show_spinner=False)
 def load_prompt(file_name: str) -> str:
     """读取外部提示词文件。"""
     file_path = PROMPTS_DIR / file_name
@@ -26,6 +28,7 @@ def load_prompt(file_name: str) -> str:
     return read_text(file_path)
 
 
+@st.cache_data(show_spinner=False)
 def load_model_config() -> Dict[str, Any]:
     """读取模型配置。"""
     config_path = CONFIG_DIR / "models.json"
@@ -34,6 +37,7 @@ def load_model_config() -> Dict[str, Any]:
     return json.loads(read_text(config_path))
 
 
+@st.cache_data(show_spinner=False)
 def load_rules_report() -> str:
     """读取规律汇总报告。"""
     if not RULES_FILE.exists():
@@ -42,7 +46,7 @@ def load_rules_report() -> str:
 
 
 def build_rules_summary(report_text: str) -> str:
-    """提取左侧展示用摘要。"""
+    """提取适合在侧边栏展示的规律摘要。"""
     wanted_headers = [
         "## 3. 共性规律提炼",
         "## 5. 可复用的爆款公式总结",
@@ -63,6 +67,7 @@ def build_rules_summary(report_text: str) -> str:
     return report_text[:1800]
 
 
+@st.cache_data(show_spinner=False)
 def load_deconstruction_results() -> List[Dict[str, str]]:
     """读取拆解结果库。"""
     results: List[Dict[str, str]] = []
@@ -106,9 +111,24 @@ def init_session_state() -> None:
             st.session_state[key] = value
 
 
+def init_static_session_data() -> None:
+    """仅在会话首次加载时准备静态数据。"""
+    if "rules_text" not in st.session_state:
+        st.session_state.rules_text = load_rules_report()
+    if "rules_summary" not in st.session_state:
+        st.session_state.rules_summary = build_rules_summary(st.session_state.rules_text)
+    if "deconstruction_results" not in st.session_state:
+        st.session_state.deconstruction_results = load_deconstruction_results()
+    if "references_text" not in st.session_state:
+        st.session_state.references_text = build_reference_digest(st.session_state.deconstruction_results)
+    if "model_config" not in st.session_state:
+        st.session_state.model_config = load_model_config()
+
+
 def set_mode(mode: str) -> None:
     """切换模式。"""
-    st.session_state.mode = mode
+    if st.session_state.mode != mode:
+        st.session_state.mode = mode
 
 
 def is_edit_request(user_text: str) -> bool:
@@ -161,7 +181,11 @@ def build_user_prompt(
     """构造本轮用户提示。"""
     mode_name = "工作模式" if mode == "work" else "个人模式"
     latest_output = st.session_state.get("latest_output", "")
-    edit_hint = "这是一次连续修改请求，请优先在已有版本基础上局部迭代。" if is_edit_request(user_text) else "这是一次新的内容请求，请先理解意图再输出。"
+    edit_hint = (
+        "这是一次连续修改请求，请优先在已有版本基础上局部迭代。"
+        if is_edit_request(user_text)
+        else "这是一次新的内容请求，请先理解意图再输出。"
+    )
 
     return f"""
 当前模式：{mode_name}
@@ -327,7 +351,9 @@ def render_chat_history() -> None:
 
 def handle_user_message(rules_text: str, references_text: str, model_config: Dict[str, Any]) -> None:
     """处理用户输入。"""
-    user_text = st.chat_input("直接像聊天一样说：领导让我写一篇文案 / 我想做个账号 / 改标题 / 换开头...")
+    user_text = st.chat_input(
+        "直接像聊天一样说：领导让我写一篇XX主题文案 / 我想做个账号 / 改标题 / 换开头..."
+    )
     if not user_text:
         return
 
@@ -364,12 +390,13 @@ def main() -> None:
         layout="wide",
     )
     init_session_state()
+    init_static_session_data()
 
-    rules_text = load_rules_report()
-    rules_summary = build_rules_summary(rules_text)
-    deconstruction_results = load_deconstruction_results()
-    references_text = build_reference_digest(deconstruction_results)
-    model_config = load_model_config()
+    rules_text = st.session_state.rules_text
+    rules_summary = st.session_state.rules_summary
+    deconstruction_results = st.session_state.deconstruction_results
+    references_text = st.session_state.references_text
+    model_config = st.session_state.model_config
 
     render_sidebar(rules_summary, deconstruction_results)
 
