@@ -2,6 +2,10 @@
   "default_model": "deepseek_chat",
   "models": {
     "deepseek_chat": {
+      "name": "DeepSeek",
+      "api_base": "https://api.deepseek.com/chat/completions",
+      "model": "deepseek-chat",
+      "api_key": "",
       "label": "DeepSeek Chat",
       "provider": "deepseek",
       "api_url": "https://api.deepseek.com/chat/completions",
@@ -9,13 +13,21 @@
       "enabled": true
     },
     "glm_4_flash": {
+      "name": "智谱 GLM-4-Flash",
+      "api_base": "https://open.bigmodel.cn/api/paas/v4/",
+      "model": "glm-4-flash",
+      "api_key": "",
       "label": "GLM-4-Flash",
       "provider": "zhipu",
-      "api_url": "",
+      "api_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
       "model_name": "glm-4-flash",
-      "enabled": false
+      "enabled": true
     },
     "gpt_4o": {
+      "name": "GPT-4o",
+      "api_base": "",
+      "model": "gpt-4o",
+      "api_key": "",
       "label": "GPT-4o",
       "provider": "openai_compatible",
       "api_url": "",
