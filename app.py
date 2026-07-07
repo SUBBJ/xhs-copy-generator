@@ -12,6 +12,12 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 DECONSTRUCT_DIR = PROJECT_ROOT / "02-拆解结果库"
 RULES_FILE = PROJECT_ROOT / "03-规律库" / "规律汇总报告.md"
 
+MODEL_LABELS = {
+    "deepseek_chat": "DeepSeek",
+    "glm_4_flash": "智谱 GLM-4-Flash",
+    "gpt_4o": "GPT-4o",
+}
+
 
 @st.cache_data(show_spinner=False)
 def read_text(file_path: Path) -> str:
@@ -97,6 +103,23 @@ def build_reference_digest(results: List[Dict[str, str]], max_items: int = 3) ->
     return "\n\n".join(digests)
 
 
+def get_model_options(model_config: Dict[str, Any]) -> List[Dict[str, str]]:
+    """把配置文件转换成下拉可用的模型列表。"""
+    models = model_config.get("models", {})
+    options: List[Dict[str, str]] = []
+
+    for model_key, model_info in models.items():
+        display_name = MODEL_LABELS.get(model_key) or model_info.get("name") or model_info.get("label") or model_key
+        options.append({"key": model_key, "name": display_name})
+
+    return options
+
+
+def get_selected_model_info(model_config: Dict[str, Any], selected_model: str) -> Dict[str, Any]:
+    """读取当前选中的模型配置。"""
+    return model_config.get("models", {}).get(selected_model, {})
+
+
 def init_session_state() -> None:
     """初始化会话状态。"""
     defaults = {
@@ -123,6 +146,15 @@ def init_static_session_data() -> None:
         st.session_state.references_text = build_reference_digest(st.session_state.deconstruction_results)
     if "model_config" not in st.session_state:
         st.session_state.model_config = load_model_config()
+
+    model_options = get_model_options(st.session_state.model_config)
+    if "model_options" not in st.session_state:
+        st.session_state.model_options = model_options
+
+    default_model = st.session_state.model_config.get("default_model", "deepseek_chat")
+    valid_keys = [item["key"] for item in st.session_state.model_options]
+    if "selected_model" not in st.session_state or st.session_state.selected_model not in valid_keys:
+        st.session_state.selected_model = default_model if default_model in valid_keys else valid_keys[0]
 
 
 def set_mode(mode: str) -> None:
@@ -235,6 +267,7 @@ def build_model_payload(mode: str, user_text: str, rules_text: str, references_t
 def call_chat_model(
     api_key: str,
     model_config: Dict[str, Any],
+    selected_model: str,
     mode: str,
     user_text: str,
     rules_text: str,
@@ -244,13 +277,14 @@ def call_chat_model(
     if not api_key.strip():
         raise RuntimeError("请先在页面左侧填写 API Key。")
 
-    default_model = model_config.get("default_model", "deepseek_chat")
-    model_info = model_config.get("models", {}).get(default_model, {})
-    api_url = model_info.get("api_url", "").strip()
-    model_name = model_info.get("model_name", "").strip()
+    model_info = get_selected_model_info(model_config, selected_model)
+    api_url = model_info.get("api_base") or model_info.get("api_url", "")
+    model_name = model_info.get("model") or model_info.get("model_name", "")
+    api_url = api_url.strip()
+    model_name = model_name.strip()
 
     if not api_url or not model_name:
-        raise RuntimeError("模型配置不完整，请检查 config/models.json。")
+        raise RuntimeError("当前选中模型配置不完整，请检查 config/models.json。")
 
     payload = {
         "model": model_name,
@@ -308,24 +342,50 @@ def render_mode_switch() -> None:
     st.caption(mode_desc)
 
 
+def render_model_selector() -> None:
+    """渲染模型选择下拉。"""
+    st.subheader("模型选择")
+    options = st.session_state.model_options
+    option_names = [item["name"] for item in options]
+    key_to_name = {item["key"]: item["name"] for item in options}
+    name_to_key = {item["name"]: item["key"] for item in options}
+
+    current_name = key_to_name.get(st.session_state.selected_model, option_names[0])
+    selected_name = st.selectbox(
+        "选择模型",
+        options=option_names,
+        index=option_names.index(current_name),
+        label_visibility="collapsed",
+    )
+    st.session_state.selected_model = name_to_key[selected_name]
+
+
 def render_sidebar(rules_summary: str, deconstruction_results: List[Dict[str, str]]) -> None:
     """渲染侧边栏。"""
     with st.sidebar:
         st.title("助手配置")
         render_mode_switch()
+        render_model_selector()
 
         st.subheader("API Key")
         st.session_state.api_key = st.text_input(
             "直接在这里填 Key",
             value=st.session_state.api_key,
             type="password",
-            placeholder="输入 DeepSeek API Key",
+            placeholder="输入通用 API Key",
         )
+
+        selected_model_info = get_selected_model_info(
+            st.session_state.model_config,
+            st.session_state.selected_model,
+        )
+        selected_model_name = MODEL_LABELS.get(st.session_state.selected_model) or selected_model_info.get("name") or selected_model_info.get("label") or st.session_state.selected_model
 
         st.subheader("当前状态")
         st.markdown(
             f"""
 - 当前模式：`{"工作模式" if st.session_state.mode == "work" else "个人模式"}`
+- 当前模型：`{selected_model_name}`
 - 参考拆解：`{len(deconstruction_results)}` 篇
 - 规律报告：`已加载`
 - API Key：`{"已填写" if st.session_state.api_key else "未填写"}`
@@ -367,6 +427,7 @@ def handle_user_message(rules_text: str, references_text: str, model_config: Dic
                 result = call_chat_model(
                     api_key=st.session_state.api_key,
                     model_config=model_config,
+                    selected_model=st.session_state.selected_model,
                     mode=st.session_state.mode,
                     user_text=user_text,
                     rules_text=rules_text,
