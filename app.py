@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib import error, parse, request
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 PROJECT_ROOT = Path(".")
@@ -55,6 +56,34 @@ CONTENT_INTENT_KEYWORDS = [
     "方向",
     "赛道",
     "产品",
+    "获客",
+    "避坑",
+    "脚本",
+    "口播",
+    "封面",
+]
+INDUSTRY_HINT_KEYWORDS = [
+    "太空舱",
+    "度假屋",
+    "民宿",
+    "露营",
+    "露营装备",
+    "酒店",
+    "旅拍",
+    "家居",
+    "美妆",
+    "穿搭",
+    "母婴",
+    "餐饮",
+    "咖啡",
+    "健身",
+    "减肥",
+    "教育",
+    "留学",
+    "装修",
+    "护肤",
+    "珠宝",
+    "婚礼",
 ]
 SEARCH_TOPIC_STOPWORDS = [
     "帮我",
@@ -82,8 +111,25 @@ SEARCH_TOPIC_STOPWORDS = [
     "我想做",
     "给我",
     "关于",
+    "写一篇",
+    "写一版",
+    "做一个",
+    "做一版",
+    "出一版",
+    "帮我写",
+    "帮我做",
+    "帮我出",
 ]
 MAX_SMART_REFERENCE_ITEMS = 6
+SMART_REFERENCE_DAYS = 7
+SUPPORTED_SKILL_ALIASES = {
+    "xiaohongshu-skill": [
+        "xiaohongshu-skill",
+        "小红书skill",
+        "小红书 Skill",
+        "小红书爆款skill",
+    ]
+}
 
 PROVIDER_DISPLAY_ORDER = ["openai_compatible", "deepseek", "zhipu"]
 PROVIDER_LABELS = {
@@ -524,16 +570,35 @@ def should_trigger_smart_reference(user_text: str) -> bool:
     normalized = user_text.strip()
     if not normalized:
         return False
-    return any(keyword in normalized for keyword in CONTENT_INTENT_KEYWORDS)
+    has_content_intent = any(keyword in normalized for keyword in CONTENT_INTENT_KEYWORDS)
+    has_industry_hint = any(keyword in normalized for keyword in INDUSTRY_HINT_KEYWORDS)
+    asks_for_recent_hits = any(keyword in normalized for keyword in SEARCH_KEYWORDS)
+    return has_content_intent or has_industry_hint or asks_for_recent_hits
+
+
+def get_requested_skill_name(user_text: str) -> str:
+    normalized = user_text.strip()
+    if not normalized.startswith("用"):
+        return ""
+    for canonical_name, aliases in SUPPORTED_SKILL_ALIASES.items():
+        if any(alias in normalized for alias in aliases):
+            return canonical_name
+    return ""
 
 
 def build_smart_reference_query(user_text: str, mode: str) -> str:
     topic = extract_search_topic(user_text)
     if not topic:
         topic = user_text.strip()[:24]
+    if any(keyword in user_text for keyword in ["获客", "转化", "引流"]):
+        return f"{topic} 小红书 获客 爆款"
+    if any(keyword in user_text for keyword in ["脚本", "口播", "视频"]):
+        return f"{topic} 小红书 脚本 爆款"
+    if any(keyword in user_text for keyword in ["文案", "图文", "选题", "策划"]):
+        return f"{topic} 小红书 爆款 选题"
     if mode == "work":
         return f"{topic} 小红书 爆款"
-    return f"{topic} 小红书 热门"
+    return f"{topic} 小红书 热门 爆款"
 
 
 def parse_xhs_skill_json(raw_text: str) -> List[Dict[str, str]]:
@@ -569,9 +634,18 @@ def parse_xhs_skill_json(raw_text: str) -> List[Dict[str, str]]:
         author = str(item.get("author") or item.get("nickname") or item.get("user_name") or "小红书").strip()
         link = str(item.get("url") or item.get("link") or item.get("note_url") or "").strip()
         likes = str(item.get("liked_count") or item.get("like_count") or item.get("likes") or "").strip()
+        favorites = str(item.get("collected_count") or item.get("collect_count") or item.get("favorites") or "").strip()
+        comments = str(item.get("comment_count") or item.get("comments") or "").strip()
         source = f"小红书/{author}" if author else "小红书"
         if likes:
             source = f"{source}/赞{likes}"
+        interaction_parts = []
+        if likes:
+            interaction_parts.append(f"点赞{likes}")
+        if favorites:
+            interaction_parts.append(f"收藏{favorites}")
+        if comments:
+            interaction_parts.append(f"评论{comments}")
         if title:
             parsed_items.append(
                 {
@@ -579,6 +653,7 @@ def parse_xhs_skill_json(raw_text: str) -> List[Dict[str, str]]:
                     "snippet": snippet or "未提供摘要",
                     "link": link or "未提供链接",
                     "source": source,
+                    "interactions": " / ".join(interaction_parts) if interaction_parts else "互动数据缺失",
                 }
             )
     return parsed_items
@@ -591,7 +666,8 @@ def search_xiaohongshu_with_skill(query: str) -> List[Dict[str, str]]:
         "xiaohongshu-skill",
         "search",
         query,
-        "--sort-by=最新",
+        "--sort-by=热门",
+        f"--days={SMART_REFERENCE_DAYS}",
         f"--limit={MAX_SMART_REFERENCE_ITEMS}",
     ]
     try:
@@ -912,12 +988,89 @@ def init_session_state() -> None:
         st.session_state.api_key_requires_manual_selection = False
     if "editing_conversation_id" not in st.session_state:
         st.session_state.editing_conversation_id = ""
+    if "chat_input_text" not in st.session_state:
+        st.session_state.chat_input_text = ""
     ensure_mode_state("work")
     ensure_mode_state("personal")
     if not st.session_state.conversations:
         create_and_select_new_conversation(st.session_state.mode)
     elif not st.session_state.current_conversation_id:
         switch_conversation(sort_conversations(st.session_state.conversations)[0]["id"])
+
+
+def render_voice_input_widget() -> None:
+    components.html(
+        """
+        <div id="voice-input-mount"></div>
+        <script>
+        (function () {
+          const parentDoc = window.parent.document;
+          const wrapper = parentDoc.querySelector('[data-testid="stAppViewContainer"]');
+          if (!wrapper) return;
+
+          const input = parentDoc.querySelector('input[aria-label="chat_text_input"]');
+          if (!input) return;
+
+          let host = parentDoc.getElementById('speech-input-host');
+          if (!host) {
+            host = parentDoc.createElement('button');
+            host.id = 'speech-input-host';
+            host.type = 'button';
+            host.innerText = '🎤';
+            host.title = '语音输入';
+            host.style.marginLeft = '8px';
+            host.style.height = '38px';
+            host.style.minWidth = '44px';
+            host.style.borderRadius = '10px';
+            host.style.border = '1px solid rgba(49,51,63,0.2)';
+            host.style.background = '#ffffff';
+            host.style.cursor = 'pointer';
+          }
+
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (!SpeechRecognition) {
+            host.style.display = 'none';
+            return;
+          }
+
+          const buttonMount = input.parentElement && input.parentElement.parentElement;
+          if (buttonMount && host.parentElement !== buttonMount) {
+            buttonMount.appendChild(host);
+          }
+
+          host.style.display = 'inline-block';
+          let recognition = new SpeechRecognition();
+          recognition.lang = 'zh-CN';
+          recognition.interimResults = false;
+          recognition.maxAlternatives = 1;
+
+          host.onclick = function () {
+            host.innerText = '🎙️';
+            try { recognition.start(); } catch (e) {}
+          };
+
+          recognition.onresult = function (event) {
+            const transcript = (event.results[0] && event.results[0][0] && event.results[0][0].transcript) || '';
+            if (!transcript) return;
+            input.focus();
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(input, transcript);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            host.innerText = '🎤';
+          };
+
+          recognition.onerror = function () {
+            host.innerText = '🎤';
+          };
+
+          recognition.onend = function () {
+            host.innerText = '🎤';
+          };
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def init_static_session_data() -> None:
@@ -1215,14 +1368,14 @@ def format_smart_reference_context(search_items: List[Dict[str, str]], query: st
     if not search_items:
         return ""
     lines = [
-        f"我查了一下最近和“{query}”相关的小红书爆款内容，这些新数据要优先影响本轮判断："
+        f"我搜了最近 {SMART_REFERENCE_DAYS} 天关于“{query}”的小红书热门内容，下面这些结果要优先影响本轮判断："
     ]
     for index, item in enumerate(search_items, start=1):
         lines.append(
             f"{index}. 标题：{item.get('title', '无法获取')} | 来源：{item.get('source', '未知')} | "
-            f"摘要：{item.get('snippet', '无法获取')} | 链接：{item.get('link', '无法获取')}"
+            f"互动：{item.get('interactions', '无法获取')} | 摘要：{item.get('snippet', '无法获取')} | 链接：{item.get('link', '无法获取')}"
         )
-    lines.append("回答时请先吸收这些最近爆款的内容角度、表达方式和切入点，再给用户建议。")
+    lines.append("回答时先总结最近什么角度更火、为什么火，再基于这些结果给用户可执行建议。")
     return "\n".join(lines)
 
 
@@ -1253,7 +1406,8 @@ def get_realtime_search_context(user_text: str, mode: str) -> str:
 
 
 def get_smart_reference_context(user_text: str, mode: str) -> str:
-    if not should_trigger_smart_reference(user_text):
+    requested_skill = get_requested_skill_name(user_text)
+    if not requested_skill and not should_trigger_smart_reference(user_text):
         return ""
     search_query = build_smart_reference_query(user_text, mode)
     cache_key = get_mode_key(mode, "smart_reference_cache")
@@ -1266,10 +1420,11 @@ def get_smart_reference_context(user_text: str, mode: str) -> str:
     st.session_state[cache_key] = search_cache
 
     if results:
-        log_runtime(f"{MODE_META[mode]['label']}补充了 {len(results)} 条智能爆款参考。")
+        trigger_label = requested_skill or "自动爆款搜索"
+        log_runtime(f"{MODE_META[mode]['label']}{trigger_label} 命中 {len(results)} 条最近爆款参考。")
         return format_smart_reference_context(results, search_query)
 
-    log_runtime(f"{MODE_META[mode]['label']}智能爆款参考未命中，已静默回退到原有规律库。")
+    log_runtime(f"{MODE_META[mode]['label']}最近爆款搜索未命中，已静默回退到原有规律库。")
     return ""
 
 
@@ -1609,11 +1764,29 @@ def handle_identity_instruction(mode: str, user_text: str) -> bool:
     return True
 
 
+def render_chat_input_bar() -> str:
+    col_input, col_send = st.columns([12, 1])
+    with col_input:
+        user_text = st.text_input(
+            "chat_text_input",
+            key="chat_text_input",
+            label_visibility="collapsed",
+            placeholder="像聊天一样直接说：领导让我写一篇 XX 文案 / 我想做个账号 / 改标题 / 记住这个身份…",
+        )
+    with col_send:
+        send_clicked = st.button("发送", use_container_width=True, key="send_chat_message")
+    render_voice_input_widget()
+    if send_clicked:
+        return user_text.strip()
+    return ""
+
+
 def handle_user_message(active_api_key: str) -> None:
     mode = st.session_state.mode
-    user_text = st.chat_input("像聊天一样直接说：领导让我写一篇 XX 文案 / 我想做个账号 / 改标题 / 记住这个身份…")
+    user_text = render_chat_input_bar()
     if not user_text:
         return
+    st.session_state.chat_text_input = ""
     append_mode_message(mode, "user", user_text)
     with st.chat_message("user"):
         st.markdown(user_text)
