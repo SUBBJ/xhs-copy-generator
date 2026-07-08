@@ -821,8 +821,50 @@ def render_sidebar() -> str:
 
 def render_chat_history(mode: str) -> None:
     for item in get_current_messages(mode):
-        with st.chat_message("user" if item["role"] == "user" else "assistant"):
-            st.markdown(item["content"])
+        if item["role"] == "user":
+            left_col, right_col = st.columns([1, 1.4])
+            with right_col:
+                st.markdown(
+                    f"""
+<div style="
+    background:#2e7d32;
+    color:white;
+    padding:10px 14px;
+    border-radius:16px;
+    margin:6px 0 6px auto;
+    width:fit-content;
+    max-width:100%;
+    font-size:14px;
+    line-height:1.6;
+    box-shadow:0 1px 2px rgba(0,0,0,.08);
+">
+{item["content"]}
+</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            left_col, right_col = st.columns([1.4, 1])
+            with left_col:
+                st.markdown(
+                    f"""
+<div style="
+    background:#f3f5f7;
+    color:#1f2937;
+    padding:10px 14px;
+    border-radius:16px;
+    margin:6px auto 6px 0;
+    width:fit-content;
+    max-width:100%;
+    font-size:14px;
+    line-height:1.6;
+    box-shadow:0 1px 2px rgba(0,0,0,.08);
+">
+{item["content"]}
+</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 def handle_identity_instruction(mode: str, user_text: str) -> bool:
