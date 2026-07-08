@@ -1,5 +1,7 @@
 import json
 import re
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -35,6 +37,51 @@ MODE_META = {
 }
 
 SEARCH_KEYWORDS = ["最新", "最近", "这两天", "今天", "趋势", "爆款", "热门", "选题", "赛道"]
+CONTENT_INTENT_KEYWORDS = [
+    "策划",
+    "选题",
+    "内容",
+    "文案",
+    "脚本",
+    "图文",
+    "视频",
+    "获客",
+    "种草",
+    "定位",
+    "起号",
+    "标题",
+    "方向",
+    "赛道",
+    "产品",
+]
+SEARCH_TOPIC_STOPWORDS = [
+    "帮我",
+    "帮忙",
+    "请你",
+    "策划",
+    "一篇",
+    "一个",
+    "一下",
+    "内容",
+    "文案",
+    "脚本",
+    "图文",
+    "视频",
+    "小红书",
+    "获客",
+    "种草",
+    "选题",
+    "标题",
+    "方案",
+    "方向",
+    "怎么做",
+    "怎么写",
+    "帮我做",
+    "我想做",
+    "给我",
+    "关于",
+]
+MAX_SMART_REFERENCE_ITEMS = 6
 
 PROVIDER_DISPLAY_ORDER = ["openai_compatible", "deepseek", "zhipu"]
 PROVIDER_LABELS = {
@@ -393,6 +440,113 @@ def clean_text(value: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", value.strip())
 
 
+def normalize_search_text(value: str) -> str:
+    text = re.sub(r"[，。！？、,.!?\-_/（）()\[\]【】：“”\"'`~]+", " ", value)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def extract_search_topic(user_text: str) -> str:
+    normalized = normalize_search_text(user_text)
+    topic = normalized
+    for stopword in SEARCH_TOPIC_STOPWORDS:
+        topic = topic.replace(stopword, " ")
+    topic = re.sub(r"\s+", " ", topic).strip()
+    if not topic:
+        return normalized[:24]
+    return topic[:32]
+
+
+def should_trigger_smart_reference(user_text: str) -> bool:
+    normalized = user_text.strip()
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in CONTENT_INTENT_KEYWORDS)
+
+
+def build_smart_reference_query(user_text: str, mode: str) -> str:
+    topic = extract_search_topic(user_text)
+    if not topic:
+        topic = user_text.strip()[:24]
+    if mode == "work":
+        return f"{topic} 小红书 爆款"
+    return f"{topic} 小红书 热门"
+
+
+def parse_xhs_skill_json(raw_text: str) -> List[Dict[str, str]]:
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return []
+
+    if isinstance(data, dict):
+        if isinstance(data.get("items"), list):
+            records = data["items"]
+        elif isinstance(data.get("data"), list):
+            records = data["data"]
+        else:
+            records = [data]
+    elif isinstance(data, list):
+        records = data
+    else:
+        return []
+
+    parsed_items: List[Dict[str, str]] = []
+    for item in records[:MAX_SMART_REFERENCE_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or item.get("note_title") or item.get("name") or "").strip()
+        snippet = str(
+            item.get("desc")
+            or item.get("content")
+            or item.get("summary")
+            or item.get("note_desc")
+            or ""
+        ).strip()
+        author = str(item.get("author") or item.get("nickname") or item.get("user_name") or "小红书").strip()
+        link = str(item.get("url") or item.get("link") or item.get("note_url") or "").strip()
+        likes = str(item.get("liked_count") or item.get("like_count") or item.get("likes") or "").strip()
+        source = f"小红书/{author}" if author else "小红书"
+        if likes:
+            source = f"{source}/赞{likes}"
+        if title:
+            parsed_items.append(
+                {
+                    "title": title,
+                    "snippet": snippet or "未提供摘要",
+                    "link": link or "未提供链接",
+                    "source": source,
+                }
+            )
+    return parsed_items
+
+
+def search_xiaohongshu_with_skill(query: str) -> List[Dict[str, str]]:
+    if not shutil.which("xiaohongshu-skill"):
+        return []
+    command = [
+        "xiaohongshu-skill",
+        "search",
+        query,
+        "--sort-by=最新",
+        f"--limit={MAX_SMART_REFERENCE_ITEMS}",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=45,
+            check=False,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    return parse_xhs_skill_json(result.stdout.strip())
+
+
 def get_selected_model_info(model_config: Dict[str, Any], selected_model: str) -> Dict[str, Any]:
     return model_config.get("models", {}).get(selected_model, {})
 
@@ -579,6 +733,7 @@ def ensure_mode_state(mode: str) -> None:
         get_mode_key(mode, "latest_output"): "",
         get_mode_key(mode, "identity"): DEFAULT_IDENTITIES[mode],
         get_mode_key(mode, "search_cache"): {},
+        get_mode_key(mode, "smart_reference_cache"): {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -764,6 +919,7 @@ def build_user_prompt(
     rules_text: str,
     references_text: str,
     search_context: str,
+    smart_reference_context: str,
 ) -> str:
     mode_name = MODE_META[mode]["label"]
     edit_hint = (
@@ -790,6 +946,9 @@ def build_user_prompt(
 拆解参考：
 {references_text[:3500]}
 
+智能爆款参考：
+{smart_reference_context or "本轮没有补充到可用的最新爆款参考，继续按规律库和拆解库判断。"}
+
 实时搜索补充：
 {search_context}
 """
@@ -802,6 +961,7 @@ def build_model_payload(
     rules_text: str,
     references_text: str,
     search_context: str,
+    smart_reference_context: str,
 ) -> List[Dict[str, str]]:
     system_prompt = build_system_prompt(mode, get_current_identity(mode))
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
@@ -810,7 +970,14 @@ def build_model_payload(
     messages.append(
         {
             "role": "user",
-            "content": build_user_prompt(user_text, mode, rules_text, references_text, search_context),
+            "content": build_user_prompt(
+                user_text,
+                mode,
+                rules_text,
+                references_text,
+                search_context,
+                smart_reference_context,
+            ),
         }
     )
     return messages
@@ -852,6 +1019,29 @@ def search_hot_posts(query: str) -> List[Dict[str, str]]:
     return results
 
 
+def format_smart_reference_context(search_items: List[Dict[str, str]], query: str) -> str:
+    if not search_items:
+        return ""
+    lines = [
+        f"我查了一下最近和“{query}”相关的小红书爆款内容，这些新数据要优先影响本轮判断："
+    ]
+    for index, item in enumerate(search_items, start=1):
+        lines.append(
+            f"{index}. 标题：{item.get('title', '无法获取')} | 来源：{item.get('source', '未知')} | "
+            f"摘要：{item.get('snippet', '无法获取')} | 链接：{item.get('link', '无法获取')}"
+        )
+    lines.append("回答时请先吸收这些最近爆款的内容角度、表达方式和切入点，再给用户建议。")
+    return "\n".join(lines)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def search_smart_reference_posts(query: str) -> List[Dict[str, str]]:
+    skill_results = search_xiaohongshu_with_skill(query)
+    if skill_results:
+        return skill_results
+    return search_hot_posts(query)
+
+
 def get_realtime_search_context(user_text: str, mode: str) -> str:
     if not should_trigger_realtime_search(user_text):
         return "本轮未触发实时搜索。"
@@ -870,6 +1060,27 @@ def get_realtime_search_context(user_text: str, mode: str) -> str:
     return format_search_context(results)
 
 
+def get_smart_reference_context(user_text: str, mode: str) -> str:
+    if not should_trigger_smart_reference(user_text):
+        return ""
+    search_query = build_smart_reference_query(user_text, mode)
+    cache_key = get_mode_key(mode, "smart_reference_cache")
+    search_cache = st.session_state.get(cache_key, {})
+    if search_query in search_cache:
+        return format_smart_reference_context(search_cache[search_query], search_query)
+
+    results = search_smart_reference_posts(search_query)
+    search_cache[search_query] = results
+    st.session_state[cache_key] = search_cache
+
+    if results:
+        log_runtime(f"{MODE_META[mode]['label']}补充了 {len(results)} 条智能爆款参考。")
+        return format_smart_reference_context(results, search_query)
+
+    log_runtime(f"{MODE_META[mode]['label']}智能爆款参考未命中，已静默回退到原有规律库。")
+    return ""
+
+
 def call_chat_model(
     api_key: str,
     model_config: Dict[str, Any],
@@ -879,6 +1090,7 @@ def call_chat_model(
     rules_text: str,
     references_text: str,
     search_context: str,
+    smart_reference_context: str,
 ) -> str:
     if not api_key.strip():
         raise RuntimeError("请先在侧边栏填写当前平台的 API Key。")
@@ -891,7 +1103,14 @@ def call_chat_model(
         raise RuntimeError("当前选中模型配置不完整，请检查 config/models.json。")
     payload = {
         "model": model_name,
-        "messages": build_model_payload(mode, user_text, rules_text, references_text, search_context),
+        "messages": build_model_payload(
+            mode,
+            user_text,
+            rules_text,
+            references_text,
+            search_context,
+            smart_reference_context,
+        ),
         "temperature": 0.7,
     }
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key.strip()}"}
@@ -1158,6 +1377,7 @@ def handle_user_message(active_api_key: str) -> None:
     with st.chat_message("assistant"):
         with st.spinner("我先帮你判断方向，再整理成初稿..."):
             try:
+                smart_reference_context = get_smart_reference_context(user_text, mode)
                 search_context = get_realtime_search_context(user_text, mode)
                 result = call_chat_model(
                     api_key=active_api_key,
@@ -1168,6 +1388,7 @@ def handle_user_message(active_api_key: str) -> None:
                     rules_text=st.session_state.rules_text,
                     references_text=st.session_state.references_text,
                     search_context=search_context,
+                    smart_reference_context=smart_reference_context,
                 )
                 st.markdown(result)
                 append_mode_message(mode, "assistant", result)
