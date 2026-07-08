@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import subprocess
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -13,6 +14,7 @@ import streamlit as st
 PROJECT_ROOT = Path(".")
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 CONFIG_DIR = PROJECT_ROOT / "config"
+CONVERSATIONS_FILE = CONFIG_DIR / "conversations.json"
 DECONSTRUCT_DIR = PROJECT_ROOT / "02-拆解结果库"
 RULES_FILE = PROJECT_ROOT / "03-规律库" / "规律汇总报告.md"
 
@@ -371,6 +373,55 @@ def load_model_config() -> Dict[str, Any]:
     if not config_path.exists():
         return {"default_model": "deepseek_chat", "models": {}}
     return json.loads(read_text(config_path))
+
+
+def get_timestamp() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def build_conversation_title(messages: List[Dict[str, str]]) -> str:
+    for item in messages:
+        content = str(item.get("content", "")).strip()
+        if content:
+            compact = re.sub(r"\s+", " ", content)
+            return compact[:20]
+    return "新对话"
+
+
+def create_conversation_record(mode: str) -> Dict[str, Any]:
+    timestamp = get_timestamp()
+    return {
+        "id": str(uuid.uuid4()),
+        "title": "新对话",
+        "messages": [],
+        "mode": mode,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+
+
+def load_conversations() -> List[Dict[str, Any]]:
+    if not CONVERSATIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(read_text(CONVERSATIONS_FILE))
+    except Exception:
+        return []
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def save_conversations(conversations: List[Dict[str, Any]]) -> None:
+    CONVERSATIONS_FILE.write_text(
+        json.dumps(conversations, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    read_text.clear()
+
+
+def sort_conversations(conversations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(conversations, key=lambda item: str(item.get("updated_at", "")), reverse=True)
 
 
 def save_model_config(model_config: Dict[str, Any]) -> None:
@@ -740,9 +791,80 @@ def ensure_mode_state(mode: str) -> None:
             st.session_state[key] = value
 
 
+def hydrate_mode_state_from_conversation(conversation: Dict[str, Any]) -> None:
+    mode = str(conversation.get("mode", "work"))
+    ensure_mode_state(mode)
+    messages = conversation.get("messages", [])
+    st.session_state[get_mode_key(mode, "messages")] = messages if isinstance(messages, list) else []
+    assistant_messages = [
+        str(item.get("content", "")).strip()
+        for item in messages
+        if isinstance(item, dict) and item.get("role") == "assistant" and str(item.get("content", "")).strip()
+    ]
+    st.session_state[get_mode_key(mode, "latest_output")] = assistant_messages[-1] if assistant_messages else ""
+    st.session_state[get_mode_key(mode, "draft_history")] = []
+
+
+def sync_current_conversation_from_mode_state() -> None:
+    conversation_id = st.session_state.get("current_conversation_id", "")
+    conversations = st.session_state.get("conversations", [])
+    if not conversation_id or not conversations:
+        return
+    mode = st.session_state.mode
+    messages = get_current_messages(mode)
+    for item in conversations:
+        if item.get("id") != conversation_id:
+            continue
+        item["mode"] = mode
+        item["messages"] = messages
+        item["title"] = build_conversation_title(messages)
+        item["updated_at"] = get_timestamp()
+        break
+    st.session_state.conversations = sort_conversations(conversations)
+    save_conversations(st.session_state.conversations)
+
+
+def switch_conversation(conversation_id: str) -> None:
+    sync_current_conversation_from_mode_state()
+    conversations = st.session_state.get("conversations", [])
+    target = next((item for item in conversations if item.get("id") == conversation_id), None)
+    if not target:
+        return
+    st.session_state.current_conversation_id = conversation_id
+    st.session_state.mode = str(target.get("mode", "work"))
+    hydrate_mode_state_from_conversation(target)
+
+
+def create_and_select_new_conversation(mode: Optional[str] = None) -> None:
+    conversation_mode = mode or st.session_state.get("mode", "work")
+    new_conversation = create_conversation_record(conversation_mode)
+    conversations = st.session_state.get("conversations", [])
+    conversations.append(new_conversation)
+    st.session_state.conversations = sort_conversations(conversations)
+    save_conversations(st.session_state.conversations)
+    switch_conversation(new_conversation["id"])
+
+
+def delete_conversation(conversation_id: str) -> None:
+    conversations = st.session_state.get("conversations", [])
+    remaining = [item for item in conversations if item.get("id") != conversation_id]
+    st.session_state.conversations = sort_conversations(remaining)
+    save_conversations(st.session_state.conversations)
+    if not remaining:
+        create_and_select_new_conversation(st.session_state.get("mode", "work"))
+        return
+    current_id = st.session_state.get("current_conversation_id", "")
+    if current_id == conversation_id:
+        switch_conversation(remaining[0]["id"])
+
+
 def init_session_state() -> None:
     if "mode" not in st.session_state:
         st.session_state.mode = "work"
+    if "conversations" not in st.session_state:
+        st.session_state.conversations = load_conversations()
+    if "current_conversation_id" not in st.session_state:
+        st.session_state.current_conversation_id = ""
     if "manual_api_keys" not in st.session_state:
         st.session_state.manual_api_keys = {}
     if "runtime_logs" not in st.session_state:
@@ -753,6 +875,10 @@ def init_session_state() -> None:
         st.session_state.api_key_requires_manual_selection = False
     ensure_mode_state("work")
     ensure_mode_state("personal")
+    if not st.session_state.conversations:
+        create_and_select_new_conversation(st.session_state.mode)
+    elif not st.session_state.current_conversation_id:
+        switch_conversation(sort_conversations(st.session_state.conversations)[0]["id"])
 
 
 def init_static_session_data() -> None:
@@ -808,6 +934,7 @@ def sync_api_key_input_for_model() -> None:
 def set_mode(mode: str) -> None:
     if st.session_state.mode != mode:
         st.session_state.mode = mode
+        sync_current_conversation_from_mode_state()
 
 
 def get_current_messages(mode: str) -> List[Dict[str, str]]:
@@ -828,12 +955,14 @@ def get_current_identity(mode: str) -> str:
 
 def set_current_identity(mode: str, identity_text: str) -> None:
     st.session_state[get_mode_key(mode, "identity")] = identity_text.strip()
+    sync_current_conversation_from_mode_state()
 
 
 def append_mode_message(mode: str, role: str, content: str) -> None:
     messages = get_current_messages(mode)
     messages.append({"role": role, "content": content})
     st.session_state[get_mode_key(mode, "messages")] = messages
+    sync_current_conversation_from_mode_state()
 
 
 def save_mode_output(mode: str, output_text: str) -> None:
@@ -841,6 +970,7 @@ def save_mode_output(mode: str, output_text: str) -> None:
     draft_history = get_current_draft_history(mode)
     draft_history.append(output_text)
     st.session_state[get_mode_key(mode, "draft_history")] = draft_history[-20:]
+    sync_current_conversation_from_mode_state()
 
 
 def is_edit_request(user_text: str) -> bool:
@@ -1264,6 +1394,31 @@ def render_api_key_input(model_info: Dict[str, Any]) -> str:
 
 def render_sidebar() -> str:
     with st.sidebar:
+        st.subheader("对话列表")
+        conversations = sort_conversations(st.session_state.get("conversations", []))
+        st.session_state.conversations = conversations
+        for conversation in conversations:
+            conversation_id = str(conversation.get("id", ""))
+            title = str(conversation.get("title", "新对话"))[:20] or "新对话"
+            item_col, delete_col = st.columns([5, 1])
+            with item_col:
+                if st.button(
+                    title,
+                    key=f"switch_conversation_{conversation_id}",
+                    use_container_width=True,
+                    type="primary" if st.session_state.get("current_conversation_id") == conversation_id else "secondary",
+                ):
+                    switch_conversation(conversation_id)
+            with delete_col:
+                if st.button("删", key=f"delete_conversation_{conversation_id}", use_container_width=True):
+                    delete_conversation(conversation_id)
+                    st.rerun()
+        if st.button("新建对话", use_container_width=True, key="create_new_conversation"):
+            sync_current_conversation_from_mode_state()
+            create_and_select_new_conversation(st.session_state.mode)
+            st.rerun()
+
+        st.divider()
         st.title("助手配置")
         render_mode_switch()
         render_model_selector()
