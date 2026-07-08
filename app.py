@@ -994,6 +994,8 @@ def init_session_state() -> None:
         st.session_state.chat_input_text = ""
     if "recording" not in st.session_state:
         st.session_state.recording = False
+    if "clear_chat_input" not in st.session_state:
+        st.session_state.clear_chat_input = False
     ensure_mode_state("work")
     ensure_mode_state("personal")
     if not st.session_state.conversations:
@@ -1769,6 +1771,9 @@ def handle_identity_instruction(mode: str, user_text: str) -> bool:
 
 
 def render_chat_input_bar() -> str:
+    if st.session_state.get("clear_chat_input"):
+        st.session_state.chat_text_input = ""
+        st.session_state.clear_chat_input = False
     col_input, col_send = st.columns([12, 1])
     with col_input:
         user_text = st.text_input(
@@ -1790,9 +1795,7 @@ def handle_user_message(active_api_key: str) -> None:
     user_text = render_chat_input_bar()
     if not user_text:
         return
-    if "chat_text_input" not in st.session_state:
-        st.session_state["chat_text_input"] = ""
-    st.session_state["chat_text_input"] = ""
+    st.session_state.clear_chat_input = True
     append_mode_message(mode, "user", user_text)
     with st.chat_message("user"):
         st.markdown(user_text)
