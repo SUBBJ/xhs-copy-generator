@@ -988,8 +988,12 @@ def init_session_state() -> None:
         st.session_state.api_key_requires_manual_selection = False
     if "editing_conversation_id" not in st.session_state:
         st.session_state.editing_conversation_id = ""
+    if "chat_text_input" not in st.session_state:
+        st.session_state.chat_text_input = ""
     if "chat_input_text" not in st.session_state:
         st.session_state.chat_input_text = ""
+    if "recording" not in st.session_state:
+        st.session_state.recording = False
     ensure_mode_state("work")
     ensure_mode_state("personal")
     if not st.session_state.conversations:
