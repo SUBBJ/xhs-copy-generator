@@ -393,6 +393,7 @@ def create_conversation_record(mode: str) -> Dict[str, Any]:
     return {
         "id": str(uuid.uuid4()),
         "title": "新对话",
+        "is_custom_title": False,
         "messages": [],
         "mode": mode,
         "created_at": timestamp,
@@ -408,7 +409,18 @@ def load_conversations() -> List[Dict[str, Any]]:
     except Exception:
         return []
     if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
+        conversations: List[Dict[str, Any]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            item.setdefault("title", "新对话")
+            item.setdefault("is_custom_title", False)
+            item.setdefault("messages", [])
+            item.setdefault("mode", "work")
+            item.setdefault("created_at", get_timestamp())
+            item.setdefault("updated_at", item.get("created_at", get_timestamp()))
+            conversations.append(item)
+        return conversations
     return []
 
 
@@ -817,11 +829,36 @@ def sync_current_conversation_from_mode_state() -> None:
             continue
         item["mode"] = mode
         item["messages"] = messages
-        item["title"] = build_conversation_title(messages)
+        if not item.get("is_custom_title", False):
+            item["title"] = build_conversation_title(messages)
         item["updated_at"] = get_timestamp()
         break
     st.session_state.conversations = sort_conversations(conversations)
     save_conversations(st.session_state.conversations)
+
+
+def rename_conversation(conversation_id: str, new_title: str) -> bool:
+    normalized_title = re.sub(r"\s+", " ", new_title).strip()
+    if not normalized_title:
+        return False
+
+    updated = False
+    conversations = st.session_state.get("conversations", [])
+    for item in conversations:
+        if item.get("id") != conversation_id:
+            continue
+        item["title"] = normalized_title[:20]
+        item["is_custom_title"] = True
+        item["updated_at"] = get_timestamp()
+        updated = True
+        break
+
+    if not updated:
+        return False
+
+    st.session_state.conversations = sort_conversations(conversations)
+    save_conversations(st.session_state.conversations)
+    return True
 
 
 def switch_conversation(conversation_id: str) -> None:
@@ -873,6 +910,8 @@ def init_session_state() -> None:
         st.session_state.api_key_status = ""
     if "api_key_requires_manual_selection" not in st.session_state:
         st.session_state.api_key_requires_manual_selection = False
+    if "editing_conversation_id" not in st.session_state:
+        st.session_state.editing_conversation_id = ""
     ensure_mode_state("work")
     ensure_mode_state("personal")
     if not st.session_state.conversations:
@@ -1400,7 +1439,8 @@ def render_sidebar() -> str:
         for conversation in conversations:
             conversation_id = str(conversation.get("id", ""))
             title = str(conversation.get("title", "新对话"))[:20] or "新对话"
-            item_col, delete_col = st.columns([5, 1])
+            is_editing = st.session_state.get("editing_conversation_id", "") == conversation_id
+            item_col, edit_col, delete_col = st.columns([5, 1, 1])
             with item_col:
                 if st.button(
                     title,
@@ -1409,12 +1449,39 @@ def render_sidebar() -> str:
                     type="primary" if st.session_state.get("current_conversation_id") == conversation_id else "secondary",
                 ):
                     switch_conversation(conversation_id)
+                    st.session_state.editing_conversation_id = ""
+            with edit_col:
+                if st.button("✏️", key=f"edit_conversation_{conversation_id}", use_container_width=True):
+                    st.session_state.editing_conversation_id = "" if is_editing else conversation_id
+                    st.rerun()
             with delete_col:
                 if st.button("删", key=f"delete_conversation_{conversation_id}", use_container_width=True):
+                    if st.session_state.get("editing_conversation_id") == conversation_id:
+                        st.session_state.editing_conversation_id = ""
                     delete_conversation(conversation_id)
                     st.rerun()
+            if is_editing:
+                st.text_input(
+                    "重命名对话",
+                    value=title,
+                    key=f"rename_input_{conversation_id}",
+                    label_visibility="collapsed",
+                    placeholder="输入新的会话标题",
+                )
+                save_col, cancel_col = st.columns(2)
+                with save_col:
+                    if st.button("保存", key=f"save_conversation_{conversation_id}", use_container_width=True):
+                        rename_value = st.session_state.get(f"rename_input_{conversation_id}", "")
+                        if rename_conversation(conversation_id, rename_value):
+                            st.session_state.editing_conversation_id = ""
+                            st.rerun()
+                with cancel_col:
+                    if st.button("取消", key=f"cancel_conversation_{conversation_id}", use_container_width=True):
+                        st.session_state.editing_conversation_id = ""
+                        st.rerun()
         if st.button("新建对话", use_container_width=True, key="create_new_conversation"):
             sync_current_conversation_from_mode_state()
+            st.session_state.editing_conversation_id = ""
             create_and_select_new_conversation(st.session_state.mode)
             st.rerun()
 
