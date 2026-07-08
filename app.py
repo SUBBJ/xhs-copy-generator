@@ -1786,7 +1786,9 @@ def handle_user_message(active_api_key: str) -> None:
     user_text = render_chat_input_bar()
     if not user_text:
         return
-    st.session_state.chat_text_input = ""
+    if "chat_text_input" not in st.session_state:
+        st.session_state["chat_text_input"] = ""
+    st.session_state["chat_text_input"] = ""
     append_mode_message(mode, "user", user_text)
     with st.chat_message("user"):
         st.markdown(user_text)
