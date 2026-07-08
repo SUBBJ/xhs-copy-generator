@@ -1017,6 +1017,27 @@ def is_edit_request(user_text: str) -> bool:
     return any(keyword in user_text for keyword in keywords)
 
 
+def is_visual_optimization_request(user_text: str) -> bool:
+    normalized = user_text.strip()
+    if not normalized:
+        return False
+    visual_keywords = [
+        "画面怎么优化",
+        "画面如何优化",
+        "这个画面怎么优化",
+        "画面怎么改",
+        "这张图怎么改",
+        "图片怎么改",
+        "封面怎么改",
+        "封面怎么优化",
+        "视觉怎么优化",
+        "排版怎么改",
+        "光线怎么改",
+        "构图怎么改",
+    ]
+    return any(keyword in normalized for keyword in visual_keywords)
+
+
 def should_trigger_realtime_search(user_text: str) -> bool:
     return any(keyword in user_text for keyword in SEARCH_KEYWORDS)
 
@@ -1053,15 +1074,17 @@ def build_identity_confirmation(mode: str, identity_text: str) -> str:
     )
 
 
-def build_system_prompt(mode: str, identity_text: str) -> str:
+def build_system_prompt(mode: str, identity_text: str, user_text: str = "") -> str:
     builtin_prompt = WORK_MODE_SYSTEM_PROMPT if mode == "work" else PERSONAL_MODE_SYSTEM_PROMPT
     builtin_task_prompt = WORK_MODE_TASK_PROMPT if mode == "work" else PERSONAL_MODE_TASK_PROMPT
     blocks = [
         builtin_prompt,
         builtin_task_prompt,
         load_prompt("task_iterate_edit.md"),
-        f"当前模式身份档案：\n{identity_text}",
     ]
+    if is_visual_optimization_request(user_text):
+        blocks.append(load_prompt("task_visual_optimization.md"))
+    blocks.append(f"当前模式身份档案：\n{identity_text}")
     return "\n\n".join([block for block in blocks if block]).strip()
 
 
@@ -1132,7 +1155,7 @@ def build_model_payload(
     search_context: str,
     smart_reference_context: str,
 ) -> List[Dict[str, str]]:
-    system_prompt = build_system_prompt(mode, get_current_identity(mode))
+    system_prompt = build_system_prompt(mode, get_current_identity(mode), user_text)
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
     history = get_current_messages(mode)[-8:]
     messages.extend(history)
