@@ -1756,29 +1756,35 @@ def render_chat_layout_styles() -> None:
     st.markdown(
         """
 <style>
-/* 固定输入框在底部 */
+/* 把整个聊天输入区域固定在底部 */
+.stChatInputContainer,
 .stChatInput,
 div[data-fixed-chat-input="true"] {
     position: fixed !important;
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    background: #ffffff !important;
-    padding: 10px 20px 14px !important;
+    background: white !important;
+    padding: 10px 20px !important;
     z-index: 999 !important;
-    border-top: 1px solid #e0e0e0 !important;
+    border-top: 2px solid #f0f0f0 !important;
     box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.06) !important;
     backdrop-filter: blur(8px);
 }
 
-/* 消息区域底部留空，避免被输入框遮挡 */
-.main > div {
+/* 所有 Streamlit 块级元素底部留白 */
+.block-container {
     padding-bottom: 120px !important;
 }
 
 /* 确保侧边栏不受影响 */
 section[data-testid="stSidebar"] {
     z-index: 1000 !important;
+}
+
+/* 强制覆盖任何可能干扰的样式 */
+.stChatInput textarea {
+    margin-bottom: 0 !important;
 }
 
 #chat-input-anchor {
