@@ -39,7 +39,7 @@ MODE_META = {
     },
 }
 
-SEARCH_KEYWORDS = ["最新", "最近", "这两天", "今天", "趋势", "爆款", "热门", "选题", "赛道"]
+SEARCH_KEYWORDS = ["最新", "最近", "这两天", "近7天", "近一周", "上周", "这周", "今天", "趋势", "风向", "爆款", "热门", "选题", "赛道", "爆文"]
 CONTENT_INTENT_KEYWORDS = [
     "策划",
     "选题",
@@ -61,8 +61,35 @@ CONTENT_INTENT_KEYWORDS = [
     "脚本",
     "口播",
     "封面",
+    "灵感",
+    "爆文",
+    "热点",
+    "对标",
+    "拆解",
+    "打法",
+    "模板",
+    "框架",
+    "案例",
+    "怎么做内容",
+    "怎么起号",
+    "写一篇",
+    "写一版",
+    "找爆款",
+    "找灵感",
 ]
 INDUSTRY_HINT_KEYWORDS = [
+    "工业制造",
+    "制造业",
+    "工厂",
+    "机械",
+    "设备",
+    "自动化",
+    "工业设计",
+    "设计师",
+    "新能源",
+    "储能",
+    "光伏",
+    "机器人",
     "太空舱",
     "度假屋",
     "民宿",
@@ -84,6 +111,27 @@ INDUSTRY_HINT_KEYWORDS = [
     "护肤",
     "珠宝",
     "婚礼",
+    "本地生活",
+    "电商",
+    "跨境",
+    "家电",
+    "数码",
+    "汽车",
+    "宠物",
+    "医疗",
+    "大健康",
+    "保险",
+    "金融",
+    "B2B",
+    "ToB",
+    "企业服务",
+    "职场",
+    "求职",
+    "知识付费",
+    "旅游",
+    "探店",
+    "摄影",
+    "连锁",
 ]
 SEARCH_TOPIC_STOPWORDS = [
     "帮我",
@@ -576,6 +624,16 @@ def should_trigger_smart_reference(user_text: str) -> bool:
     return has_content_intent or has_industry_hint or asks_for_recent_hits
 
 
+def should_trigger_realtime_search(user_text: str) -> bool:
+    normalized = user_text.strip()
+    if not normalized:
+        return False
+    has_content_intent = any(keyword in normalized for keyword in CONTENT_INTENT_KEYWORDS)
+    has_industry_hint = any(keyword in normalized for keyword in INDUSTRY_HINT_KEYWORDS)
+    asks_for_recent_hits = any(keyword in normalized for keyword in SEARCH_KEYWORDS)
+    return asks_for_recent_hits or (has_content_intent and has_industry_hint)
+
+
 def get_requested_skill_name(user_text: str) -> str:
     normalized = user_text.strip()
     if not normalized.startswith("用"):
@@ -591,14 +649,14 @@ def build_smart_reference_query(user_text: str, mode: str) -> str:
     if not topic:
         topic = user_text.strip()[:24]
     if any(keyword in user_text for keyword in ["获客", "转化", "引流"]):
-        return f"{topic} 小红书 获客 爆款"
+        return f"site:xiaohongshu.com {topic} 小红书 最近{SMART_REFERENCE_DAYS}天 获客 引流 转化 爆款 热门"
     if any(keyword in user_text for keyword in ["脚本", "口播", "视频"]):
-        return f"{topic} 小红书 脚本 爆款"
+        return f"site:xiaohongshu.com {topic} 小红书 最近{SMART_REFERENCE_DAYS}天 视频 口播 脚本 爆款 热门"
     if any(keyword in user_text for keyword in ["文案", "图文", "选题", "策划"]):
-        return f"{topic} 小红书 爆款 选题"
+        return f"site:xiaohongshu.com {topic} 小红书 最近{SMART_REFERENCE_DAYS}天 爆款 热门 选题 标题"
     if mode == "work":
-        return f"{topic} 小红书 爆款"
-    return f"{topic} 小红书 热门 爆款"
+        return f"site:xiaohongshu.com {topic} 小红书 最近{SMART_REFERENCE_DAYS}天 行业案例 爆款 热门"
+    return f"site:xiaohongshu.com {topic} 小红书 最近{SMART_REFERENCE_DAYS}天 热门 爆款 笔记"
 
 
 def parse_xhs_skill_json(raw_text: str) -> List[Dict[str, str]]:
@@ -1197,10 +1255,6 @@ def is_visual_optimization_request(user_text: str) -> bool:
     return any(keyword in normalized for keyword in visual_keywords)
 
 
-def should_trigger_realtime_search(user_text: str) -> bool:
-    return any(keyword in user_text for keyword in SEARCH_KEYWORDS)
-
-
 def parse_identity_update(user_text: str, current_mode: str) -> Optional[Tuple[str, str]]:
     normalized = user_text.strip()
     if "记住这个身份" in normalized or "记住我的身份" in normalized:
@@ -1249,13 +1303,14 @@ def build_system_prompt(mode: str, identity_text: str, user_text: str = "") -> s
 
 def format_search_context(search_items: List[Dict[str, str]]) -> str:
     if not search_items:
-        return "本轮未补充实时搜索结果。"
-    lines = ["本轮补充了实时搜索线索，请优先把它们作为最新市场信号使用："]
+        return "搜索暂时不可用，我先按已有规律库、拆解库和历史上下文继续判断。"
+    lines = [f"刚搜了这个赛道最近 {SMART_REFERENCE_DAYS} 天的小红书相关热门内容，请优先把它们作为最新市场信号使用："]
     for index, item in enumerate(search_items, start=1):
         lines.append(
             f"{index}. 标题：{item.get('title', '无法获取')} | 来源：{item.get('source', '未知')} | "
             f"摘要：{item.get('snippet', '无法获取')} | 链接：{item.get('link', '无法获取')}"
         )
+    lines.append("回答时先说你刚看了最近内容，再提炼 2 到 3 个可借鉴点，最后结合规律库给具体选题、文案或策划建议。")
     return "\n".join(lines)
 
 
@@ -1396,7 +1451,14 @@ def search_smart_reference_posts(query: str) -> List[Dict[str, str]]:
 def get_realtime_search_context(user_text: str, mode: str) -> str:
     if not should_trigger_realtime_search(user_text):
         return "本轮未触发实时搜索。"
-    search_query = f"小红书 {user_text} 爆款" if mode == "personal" else f"小红书 {user_text} 行业案例 爆款"
+    topic = extract_search_topic(user_text)
+    if not topic:
+        topic = user_text.strip()[:24]
+    search_query = (
+        f"site:xiaohongshu.com {topic} 小红书 最近{SMART_REFERENCE_DAYS}天 热门 爆款 笔记"
+        if mode == "personal"
+        else f"site:xiaohongshu.com {topic} 小红书 最近{SMART_REFERENCE_DAYS}天 行业案例 爆款 热门"
+    )
     mode_cache_key = get_mode_key(mode, "search_cache")
     search_cache = st.session_state.get(mode_cache_key, {})
     if search_query in search_cache:
@@ -1407,7 +1469,7 @@ def get_realtime_search_context(user_text: str, mode: str) -> str:
     if results:
         log_runtime(f"{MODE_META[mode]['label']}补充了 {len(results)} 条实时搜索线索。")
     else:
-        log_runtime(f"{MODE_META[mode]['label']}本轮没有抓到可用实时搜索结果。")
+        log_runtime(f"{MODE_META[mode]['label']}实时搜索暂时不可用，已静默回退到规律库和拆解库。")
     return format_search_context(results)
 
 
