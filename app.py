@@ -1756,39 +1756,30 @@ def render_chat_layout_styles() -> None:
     st.markdown(
         """
 <style>
-/* 把整个聊天输入区域固定在底部 */
-.stChatInputContainer,
-.stChatInput,
-div[data-fixed-chat-input="true"] {
-    position: fixed !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    background: white !important;
-    padding: 10px 20px !important;
-    z-index: 999 !important;
-    border-top: 2px solid #f0f0f0 !important;
-    box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.06) !important;
-    backdrop-filter: blur(8px);
-}
-
-/* 所有 Streamlit 块级元素底部留白 */
 .block-container {
-    padding-bottom: 120px !important;
+    padding-bottom: 110px !important;
 }
 
-/* 确保侧边栏不受影响 */
+.main > div:first-child {
+    height: calc(100vh - 220px) !important;
+    overflow: hidden !important;
+}
+
+.stChatInput {
+    position: sticky !important;
+    bottom: 0 !important;
+    background: white !important;
+    padding: 10px 0 !important;
+    border-top: 1px solid #ddd !important;
+    z-index: 999 !important;
+}
+
+[data-testid="stVerticalBlock"] [data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] {
+    height: 100%;
+}
+
 section[data-testid="stSidebar"] {
     z-index: 1000 !important;
-}
-
-/* 强制覆盖任何可能干扰的样式 */
-.stChatInput textarea {
-    margin-bottom: 0 !important;
-}
-
-#chat-input-anchor {
-    height: 1px;
 }
 </style>
         """,
@@ -1805,9 +1796,26 @@ def render_bottom_scroll_anchor() -> None:
           const parentDoc = window.parent.document;
           const anchorId = "chat-bottom-anchor";
 
+          function findScrollableParent(node) {
+            let current = node;
+            while (current) {
+              const style = window.getComputedStyle(current);
+              const overflowY = style ? style.overflowY : "";
+              if ((overflowY === "auto" || overflowY === "scroll") && current.scrollHeight > current.clientHeight) {
+                return current;
+              }
+              current = current.parentElement;
+            }
+            return parentDoc.scrollingElement || parentDoc.documentElement;
+          }
+
           function scrollToBottom() {
             const anchor = parentDoc.getElementById(anchorId);
             if (!anchor) return false;
+            const scrollParent = findScrollableParent(anchor);
+            if (scrollParent) {
+              scrollParent.scrollTop = scrollParent.scrollHeight;
+            }
             anchor.scrollIntoView({ block: "end", behavior: "auto" });
             return true;
           }
@@ -1848,79 +1856,34 @@ def handle_identity_instruction(mode: str, user_text: str) -> bool:
     return True
 
 
-def render_chat_input_bar() -> str:
-    if st.session_state.get("clear_chat_input"):
-        st.session_state.chat_text_input = ""
-        st.session_state.clear_chat_input = False
-    st.markdown('<div id="chat-input-anchor"></div>', unsafe_allow_html=True)
-    col_input, col_send = st.columns([12, 1])
-    with col_input:
-        user_text = st.text_input(
-            "chat_text_input",
-            key="chat_text_input",
-            label_visibility="collapsed",
-            placeholder="像聊天一样直接说：领导让我写一篇 XX 文案 / 我想做个账号 / 改标题 / 记住这个身份…",
-        )
-    with col_send:
-        send_clicked = st.button("发送", use_container_width=True, key="send_chat_message")
-    render_voice_input_widget()
-    components.html(
-        """
-        <script>
-        (function () {
-          const parentDoc = window.parent.document;
-          const anchor = parentDoc.getElementById("chat-input-anchor");
-          if (!anchor) return;
-
-          const block = anchor.closest('[data-testid="stVerticalBlock"]');
-          if (!block) return;
-
-          block.dataset.fixedChatInput = "true";
-        })();
-        </script>
-        """,
-        height=0,
-    )
-    if send_clicked:
-        return user_text.strip()
-    return ""
-
-
-def handle_user_message(active_api_key: str) -> None:
+def handle_user_message(active_api_key: str, user_text: str) -> None:
     mode = st.session_state.mode
-    user_text = render_chat_input_bar()
+    user_text = user_text.strip()
     if not user_text:
         return
-    st.session_state.clear_chat_input = True
     append_mode_message(mode, "user", user_text)
-    with st.chat_message("user"):
-        st.markdown(user_text)
     if handle_identity_instruction(mode, user_text):
         return
-    with st.chat_message("assistant"):
-        with st.spinner("我先帮你判断方向，再整理成初稿..."):
-            try:
-                smart_reference_context = get_smart_reference_context(user_text, mode)
-                search_context = get_realtime_search_context(user_text, mode)
-                result = call_chat_model(
-                    api_key=active_api_key,
-                    model_config=st.session_state.model_config,
-                    selected_model=st.session_state.selected_model,
-                    mode=mode,
-                    user_text=user_text,
-                    rules_text=st.session_state.rules_text,
-                    references_text=st.session_state.references_text,
-                    search_context=search_context,
-                    smart_reference_context=smart_reference_context,
-                )
-                st.markdown(result)
-                append_mode_message(mode, "assistant", result)
-                save_mode_output(mode, result)
-            except Exception as exc:
-                error_text = f"生成失败：{exc}"
-                st.error(error_text)
-                append_mode_message(mode, "assistant", error_text)
-                log_runtime(error_text)
+    try:
+        smart_reference_context = get_smart_reference_context(user_text, mode)
+        search_context = get_realtime_search_context(user_text, mode)
+        result = call_chat_model(
+            api_key=active_api_key,
+            model_config=st.session_state.model_config,
+            selected_model=st.session_state.selected_model,
+            mode=mode,
+            user_text=user_text,
+            rules_text=st.session_state.rules_text,
+            references_text=st.session_state.references_text,
+            search_context=search_context,
+            smart_reference_context=smart_reference_context,
+        )
+        append_mode_message(mode, "assistant", result)
+        save_mode_output(mode, result)
+    except Exception as exc:
+        error_text = f"生成失败：{exc}"
+        append_mode_message(mode, "assistant", error_text)
+        log_runtime(error_text)
 
 
 def main() -> None:
@@ -1933,13 +1896,15 @@ def main() -> None:
     st.caption("像聊天一样输入任务或想法，系统会结合规律、样本和实时搜索，先判断方向，再给你可执行内容。")
     st.info(MODE_META[mode]["intro"])
     render_chat_layout_styles()
-    msg_container = st.container()
-    input_container = st.container()
+    msg_container = st.container(height=600)
     with msg_container:
         render_chat_history(mode)
         render_bottom_scroll_anchor()
-    with input_container:
-        handle_user_message(active_api_key)
+    user_text = st.chat_input("像聊天一样直接说...")
+    if user_text:
+        with st.spinner("我先帮你判断方向，再整理成初稿..."):
+            handle_user_message(active_api_key, user_text)
+        st.rerun()
 
 
 if __name__ == "__main__":
