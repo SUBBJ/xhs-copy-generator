@@ -1756,8 +1756,29 @@ def render_chat_layout_styles() -> None:
     st.markdown(
         """
 <style>
-div[data-testid="stAppViewContainer"] > .main {
-    padding-bottom: 180px;
+/* 固定输入框在底部 */
+.stChatInput,
+div[data-fixed-chat-input="true"] {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    background: #ffffff !important;
+    padding: 10px 20px 14px !important;
+    z-index: 999 !important;
+    border-top: 1px solid #e0e0e0 !important;
+    box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.06) !important;
+    backdrop-filter: blur(8px);
+}
+
+/* 消息区域底部留空，避免被输入框遮挡 */
+.main > div {
+    padding-bottom: 120px !important;
+}
+
+/* 确保侧边栏不受影响 */
+section[data-testid="stSidebar"] {
+    z-index: 1000 !important;
 }
 
 #chat-input-anchor {
@@ -1848,24 +1869,7 @@ def render_chat_input_bar() -> str:
           const block = anchor.closest('[data-testid="stVerticalBlock"]');
           if (!block) return;
 
-          if (block.dataset.fixedChatInputReady === "true") return;
-          block.dataset.fixedChatInputReady = "true";
-
-          block.style.position = "fixed";
-          block.style.left = "0";
-          block.style.right = "0";
-          block.style.bottom = "0";
-          block.style.zIndex = "999";
-          block.style.padding = "12px 24px 16px";
-          block.style.background = "rgba(255,255,255,0.96)";
-          block.style.backdropFilter = "blur(8px)";
-          block.style.borderTop = "1px solid rgba(15,23,42,0.08)";
-          block.style.boxShadow = "0 -6px 20px rgba(15,23,42,0.06)";
-
-          const mainBlock = parentDoc.querySelector('div[data-testid="stAppViewContainer"] .main');
-          if (mainBlock) {
-            mainBlock.style.paddingBottom = "180px";
-          }
+          block.dataset.fixedChatInput = "true";
         })();
         </script>
         """,
