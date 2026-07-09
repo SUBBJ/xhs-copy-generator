@@ -1752,6 +1752,57 @@ def render_chat_history(mode: str) -> None:
                 )
 
 
+def render_chat_layout_styles() -> None:
+    st.markdown(
+        """
+<style>
+div[data-testid="stAppViewContainer"] > .main {
+    padding-bottom: 180px;
+}
+
+#chat-input-anchor {
+    height: 1px;
+}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_bottom_scroll_anchor() -> None:
+    st.markdown('<div id="chat-bottom-anchor"></div>', unsafe_allow_html=True)
+    components.html(
+        """
+        <script>
+        (function () {
+          const parentDoc = window.parent.document;
+          const anchorId = "chat-bottom-anchor";
+
+          function scrollToBottom() {
+            const anchor = parentDoc.getElementById(anchorId);
+            if (!anchor) return false;
+            anchor.scrollIntoView({ block: "end", behavior: "auto" });
+            return true;
+          }
+
+          let attempts = 0;
+          const timer = window.setInterval(function () {
+            attempts += 1;
+            if (scrollToBottom() || attempts > 20) {
+              window.clearInterval(timer);
+            }
+          }, 150);
+
+          window.setTimeout(scrollToBottom, 0);
+          window.setTimeout(scrollToBottom, 300);
+          window.setTimeout(scrollToBottom, 800);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def handle_identity_instruction(mode: str, user_text: str) -> bool:
     identity_update = parse_identity_update(user_text, mode)
     if not identity_update:
@@ -1774,6 +1825,7 @@ def render_chat_input_bar() -> str:
     if st.session_state.get("clear_chat_input"):
         st.session_state.chat_text_input = ""
         st.session_state.clear_chat_input = False
+    st.markdown('<div id="chat-input-anchor"></div>', unsafe_allow_html=True)
     col_input, col_send = st.columns([12, 1])
     with col_input:
         user_text = st.text_input(
@@ -1785,6 +1837,40 @@ def render_chat_input_bar() -> str:
     with col_send:
         send_clicked = st.button("发送", use_container_width=True, key="send_chat_message")
     render_voice_input_widget()
+    components.html(
+        """
+        <script>
+        (function () {
+          const parentDoc = window.parent.document;
+          const anchor = parentDoc.getElementById("chat-input-anchor");
+          if (!anchor) return;
+
+          const block = anchor.closest('[data-testid="stVerticalBlock"]');
+          if (!block) return;
+
+          if (block.dataset.fixedChatInputReady === "true") return;
+          block.dataset.fixedChatInputReady = "true";
+
+          block.style.position = "fixed";
+          block.style.left = "0";
+          block.style.right = "0";
+          block.style.bottom = "0";
+          block.style.zIndex = "999";
+          block.style.padding = "12px 24px 16px";
+          block.style.background = "rgba(255,255,255,0.96)";
+          block.style.backdropFilter = "blur(8px)";
+          block.style.borderTop = "1px solid rgba(15,23,42,0.08)";
+          block.style.boxShadow = "0 -6px 20px rgba(15,23,42,0.06)";
+
+          const mainBlock = parentDoc.querySelector('div[data-testid="stAppViewContainer"] .main');
+          if (mainBlock) {
+            mainBlock.style.paddingBottom = "180px";
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
     if send_clicked:
         return user_text.strip()
     return ""
@@ -1836,8 +1922,14 @@ def main() -> None:
     st.title("内容创作聊天助手")
     st.caption("像聊天一样输入任务或想法，系统会结合规律、样本和实时搜索，先判断方向，再给你可执行内容。")
     st.info(MODE_META[mode]["intro"])
-    render_chat_history(mode)
-    handle_user_message(active_api_key)
+    render_chat_layout_styles()
+    msg_container = st.container()
+    input_container = st.container()
+    with msg_container:
+        render_chat_history(mode)
+        render_bottom_scroll_anchor()
+    with input_container:
+        handle_user_message(active_api_key)
 
 
 if __name__ == "__main__":
