@@ -1316,7 +1316,7 @@ def build_model_payload(
 ) -> List[Dict[str, str]]:
     system_prompt = build_system_prompt(mode, get_current_identity(mode), user_text)
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
-    history = get_current_messages(mode)[-8:]
+    history = get_current_messages(mode)[-30:]
     messages.extend(history)
     messages.append(
         {
