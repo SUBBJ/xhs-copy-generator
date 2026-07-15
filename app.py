@@ -535,6 +535,86 @@ def render_sidebar() -> str:
         return resolve_api_key(current_model, selected_model_info)
 
 
+def render_sidebar_v2() -> str:
+    with st.sidebar:
+        if "api_key_input" not in st.session_state:
+            st.session_state.api_key_input = ""
+        if "api_base_input" not in st.session_state:
+            st.session_state.api_base_input = ""
+        st.title("⚡ 智能体")
+
+        with st.expander("📋 历史消息", expanded=True):
+            if st.session_state.messages:
+                for item in st.session_state.messages[-12:]:
+                    role_label = "你" if item["role"] == "user" else "助手"
+                    preview = item["content"].strip().replace("\n", " ")
+                    if len(preview) > 60:
+                        preview = f"{preview[:60]}..."
+                    st.caption(f"{role_label}：{preview}")
+            else:
+                st.caption("暂无历史消息")
+
+        st.divider()
+
+        selected_model_info = get_selected_model_info(
+            st.session_state.model_config,
+            st.session_state.selected_model,
+        )
+        current_model = st.session_state.selected_model
+
+        status_text = st.session_state.api_key_detect_status or "未连接"
+        st.caption(status_text)
+
+        with st.expander("⚙️ 高级设置", expanded=False):
+            col_input, col_action = st.columns([5, 1])
+            with col_input:
+                input_value = st.text_input(
+                    "API Key",
+                    key="api_key_input",
+                    type="password",
+                    placeholder="直接粘贴密钥",
+                )
+            with col_action:
+                clear_clicked = st.button("清除", key=f"clear_api_key_{current_model}", use_container_width=True)
+
+            if clear_clicked:
+                st.session_state.manual_api_keys[current_model] = ""
+                persist_model_api_key(current_model, "")
+                st.session_state.api_key_input = ""
+                st.session_state.api_key_detect_status = ""
+                st.rerun()
+
+            normalized_input = input_value.strip()
+            if not normalized_input:
+                st.session_state.manual_api_keys[current_model] = ""
+                persist_model_api_key(current_model, "")
+                st.session_state.api_key_detect_status = ""
+            else:
+                detected_model = detect_model_from_api_key(normalized_input, st.session_state.model_config)
+                if detected_model:
+                    st.session_state.manual_api_keys[detected_model] = normalized_input
+                    persist_model_api_key(detected_model, normalized_input)
+                    st.session_state.api_key_detect_status = f"已连接：{get_detected_model_label(detected_model, st.session_state.model_config)}"
+                    if st.session_state.selected_model != detected_model:
+                        st.session_state.selected_model = detected_model
+                        sync_api_key_input_for_model()
+                    current_model = detected_model
+                    selected_model_info = get_selected_model_info(st.session_state.model_config, current_model)
+                else:
+                    st.session_state.api_key_detect_status = "未能识别该 Key，请手动选择模型"
+                    st.session_state.manual_api_keys[current_model] = normalized_input
+                    persist_model_api_key(current_model, normalized_input)
+
+            st.text_input(
+                "API Base URL",
+                key="api_base_input",
+                placeholder="例如：https://artislg.com/api/v1",
+                help="留空则使用当前模型配置中的默认地址",
+            )
+
+        return resolve_api_key(current_model, selected_model_info)
+
+
 def render_chat_history() -> None:
     for item in st.session_state.messages:
         with st.chat_message(item["role"]):
@@ -577,7 +657,7 @@ def main() -> None:
     init_session_state()
     inject_styles()
 
-    active_api_key = render_sidebar()
+    active_api_key = render_sidebar_v2()
 
     st.markdown(
         """
