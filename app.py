@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib import error, request
 
 import streamlit as st
@@ -11,6 +11,197 @@ PROJECT_ROOT = Path(".")
 CONFIG_DIR = PROJECT_ROOT / "config"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 SYSTEM_PROMPT_FILE = PROMPTS_DIR / "system.md"
+
+
+def inject_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --bg-start: #0b0d15;
+            --bg-end: #1a1d2e;
+            --panel: rgba(255, 255, 255, 0.04);
+            --panel-strong: rgba(255, 255, 255, 0.06);
+            --border: rgba(255, 255, 255, 0.06);
+            --border-strong: rgba(255, 255, 255, 0.08);
+            --text-main: rgba(255, 255, 255, 0.94);
+            --text-sub: rgba(255, 255, 255, 0.62);
+        }
+
+        html, body, [data-testid="stAppViewContainer"] {
+            min-height: 100%;
+            background: linear-gradient(145deg, var(--bg-start) 0%, var(--bg-end) 100%);
+        }
+
+        [data-testid="stAppViewContainer"] > .main {
+            background: linear-gradient(145deg, var(--bg-start) 0%, var(--bg-end) 100%);
+        }
+
+        [data-testid="stHeader"] {
+            background: transparent;
+        }
+
+        [data-testid="stSidebar"] {
+            background: #0f111a;
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        [data-testid="stSidebar"] > div:first-child {
+            border-radius: 16px;
+            margin: 12px;
+            padding: 8px 10px 12px 10px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .main .block-container {
+            max-width: 1100px;
+            padding-top: 2rem;
+            padding-bottom: 7rem;
+        }
+
+        .hero-shell {
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 1.25rem 1.25rem 0.75rem 1.25rem;
+            margin-bottom: 1.2rem;
+        }
+
+        .hero-kicker {
+            color: var(--text-sub);
+            font-size: 0.82rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            margin-bottom: 0.45rem;
+        }
+
+        .hero-title {
+            color: var(--text-main);
+            font-size: clamp(2rem, 4vw, 3.2rem);
+            line-height: 1.04;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            margin: 0 0 0.45rem 0;
+        }
+
+        .hero-subtitle {
+            color: var(--text-sub);
+            font-size: 0.98rem;
+            line-height: 1.6;
+            max-width: 52rem;
+            margin: 0;
+        }
+
+        [data-testid="stChatMessage"] {
+            border-radius: 16px;
+            padding: 0.15rem 0.2rem;
+            margin-bottom: 0.8rem;
+        }
+
+        [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+            color: var(--text-main);
+        }
+
+        [data-testid="stChatMessage"]:has([aria-label="user"]) {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        [data-testid="stChatMessage"]:has([aria-label="assistant"]) {
+            display: flex;
+            justify-content: flex-start;
+        }
+
+        [data-testid="stChatMessage"]:has([aria-label="user"]) > div {
+            max-width: min(78%, 820px);
+            border-radius: 16px;
+            background: linear-gradient(145deg, #2a2f45 0%, #22263a 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.9rem 1rem;
+            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2);
+        }
+
+        [data-testid="stChatMessage"]:has([aria-label="assistant"]) > div {
+            max-width: min(78%, 820px);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 0.9rem 1rem;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        /* 微信式左右对话气泡 */
+        [data-testid="stChatMessageUser"] {
+            display: flex !important;
+            justify-content: flex-end !important;
+        }
+
+        [data-testid="stChatMessageUser"] div {
+            max-width: 80% !important;
+            background: #2a2f45 !important;
+            border-radius: 16px !important;
+            padding: 12px 18px !important;
+        }
+
+        [data-testid="stChatMessageAssistant"] {
+            display: flex !important;
+            justify-content: flex-start !important;
+        }
+
+        [data-testid="stChatMessageAssistant"] div {
+            max-width: 80% !important;
+            background: rgba(255,255,255,0.06) !important;
+            border-radius: 16px !important;
+            padding: 12px 18px !important;
+        }
+
+        [data-testid="stChatMessageUser"] > div,
+        [data-testid="stChatMessageAssistant"] > div {
+            width: fit-content;
+        }
+
+        [data-testid="stChatInput"] {
+            background: rgba(255, 255, 255, 0.04);
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+
+        [data-testid="stChatInput"] textarea {
+            border-radius: 14px !important;
+        }
+
+        [data-testid="stChatInput"] textarea:focus {
+            border: 1px solid rgba(140, 167, 255, 0.7) !important;
+            box-shadow: 0 0 0 1px rgba(140, 167, 255, 0.2), 0 0 0 4px rgba(140, 167, 255, 0.08) !important;
+        }
+
+        [data-testid="stTextInput"] input,
+        [data-testid="stSelectbox"] [role="combobox"] {
+            border-radius: 12px !important;
+        }
+
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] div,
+        [data-testid="stSidebar"] span {
+            color: rgba(255, 255, 255, 0.86);
+        }
+
+        [data-testid="stSidebar"] .stExpander {
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.02);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def read_text(file_path: Path) -> str:
@@ -102,6 +293,8 @@ def init_session_state() -> None:
 
 
 def sync_api_key_input_for_model() -> None:
+    if "api_key_input" not in st.session_state:
+        st.session_state.api_key_input = ""
     current_model = st.session_state.selected_model
     current_info = get_selected_model_info(st.session_state.model_config, current_model)
     st.session_state.api_key_input = resolve_api_key(current_model, current_info)
@@ -215,7 +408,7 @@ def call_chat_model(
 
 def render_sidebar() -> str:
     with st.sidebar:
-        st.title("助手配置")
+        st.title("⚡ 智能体")
 
         selected_model_info = get_selected_model_info(
             st.session_state.model_config,
@@ -226,10 +419,10 @@ def render_sidebar() -> str:
         col_input, col_action = st.columns([5, 1])
         with col_input:
             input_value = st.text_input(
-                f"{model_name} API Key",
+                "密钥",
                 key="api_key_input",
                 type="password",
-                placeholder="直接粘贴 API Key",
+                placeholder="直接粘贴密钥",
                 label_visibility="collapsed",
             )
         with col_action:
@@ -327,11 +520,20 @@ def main() -> None:
         layout="wide",
     )
     init_session_state()
+    inject_styles()
 
     active_api_key = render_sidebar()
 
-    st.title("自由对话助手")
-    st.caption("像正常聊天一样直接说，模型会根据上下文自由回应。")
+    st.markdown(
+        """
+        <div class="hero-shell">
+            <div class="hero-kicker">Free conversation</div>
+            <h1 class="hero-title">自由对话助手</h1>
+            <p class="hero-subtitle">像正常聊天一样直接说，系统会根据上下文自由回应。</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     render_chat_history()
     handle_user_message(active_api_key)
