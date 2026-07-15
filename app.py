@@ -442,6 +442,8 @@ def call_chat_model(
 
 def render_sidebar() -> str:
     with st.sidebar:
+        if "api_key_input" not in st.session_state:
+            st.session_state.api_key_input = ""
         st.title("⚡ 智能体")
 
         selected_model_info = get_selected_model_info(
