@@ -313,6 +313,10 @@ def init_session_state() -> None:
         current_model = st.session_state.selected_model
         current_info = get_selected_model_info(st.session_state.model_config, current_model)
         st.session_state.api_key_input = resolve_api_key(current_model, current_info)
+    if "api_base_input" not in st.session_state:
+        current_model = st.session_state.selected_model
+        current_info = get_selected_model_info(st.session_state.model_config, current_model)
+        st.session_state.api_base_input = str(current_info.get("api_base") or current_info.get("api_url", "")).strip()
     if "api_key_detect_status" not in st.session_state:
         st.session_state.api_key_detect_status = ""
     for model_option in st.session_state.model_options:
@@ -332,6 +336,14 @@ def sync_api_key_input_for_model() -> None:
     current_model = st.session_state.selected_model
     current_info = get_selected_model_info(st.session_state.model_config, current_model)
     st.session_state.api_key_input = resolve_api_key(current_model, current_info)
+
+
+def sync_api_base_input_for_model() -> None:
+    if "api_base_input" not in st.session_state:
+        st.session_state.api_base_input = ""
+    current_model = st.session_state.selected_model
+    current_info = get_selected_model_info(st.session_state.model_config, current_model)
+    st.session_state.api_base_input = str(current_info.get("api_base") or current_info.get("api_url", "")).strip()
 
 
 def detect_model_from_api_key(api_key: str, model_config: Dict[str, Any]) -> Optional[str]:
@@ -400,7 +412,9 @@ def call_chat_model(
         raise RuntimeError("请先在侧边栏填写当前模型的 API Key。")
 
     model_info = get_selected_model_info(model_config, selected_model)
-    api_url = str(model_info.get("api_base") or model_info.get("api_url", "")).strip()
+    api_url = str(st.session_state.get("api_base_input", "")).strip()
+    if not api_url:
+        api_url = str(model_info.get("api_base") or model_info.get("api_url", "")).strip()
     model_name = str(model_info.get("model") or model_info.get("model_name", "")).strip()
     if api_url.endswith("/"):
         api_url = f"{api_url}chat/completions"
@@ -444,6 +458,8 @@ def render_sidebar() -> str:
     with st.sidebar:
         if "api_key_input" not in st.session_state:
             st.session_state.api_key_input = ""
+        if "api_base_input" not in st.session_state:
+            st.session_state.api_base_input = ""
         st.title("⚡ 智能体")
 
         selected_model_info = get_selected_model_info(
@@ -515,6 +531,14 @@ def render_sidebar() -> str:
             if new_key != st.session_state.selected_model:
                 st.session_state.selected_model = new_key
                 sync_api_key_input_for_model()
+                sync_api_base_input_for_model()
+
+            st.text_input(
+                "API Base URL",
+                key="api_base_input",
+                placeholder="例如：https://artislg.com/api/v1",
+                help="留空则使用当前模型配置中的默认地址",
+            )
 
         return resolve_api_key(current_model, selected_model_info)
 
