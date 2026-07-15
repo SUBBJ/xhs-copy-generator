@@ -3,79 +3,26 @@
   "models": {
     "deepseek_chat": {
       "name": "DeepSeek",
+      "provider": "deepseek",
       "api_base": "https://api.deepseek.com/chat/completions",
       "model": "deepseek-chat",
       "api_key": "",
-      "label": "DeepSeek-Chat",
-      "provider": "deepseek",
-      "api_url": "https://api.deepseek.com/chat/completions",
-      "model_name": "deepseek-chat",
-      "enabled": true
-    },
-    "deepseek_v3": {
-      "name": "DeepSeek V3",
-      "api_base": "https://api.deepseek.com/chat/completions",
-      "model": "deepseek-v3",
-      "api_key": "",
-      "label": "DeepSeek-V3",
-      "provider": "deepseek",
-      "api_url": "https://api.deepseek.com/chat/completions",
-      "model_name": "deepseek-v3",
       "enabled": true
     },
     "glm_4_flash": {
-      "name": "质谱 GLM-4-Flash",
+      "name": "智谱 GLM-4-Flash",
+      "provider": "zhipu",
       "api_base": "https://open.bigmodel.cn/api/paas/v4/",
       "model": "glm-4-flash",
       "api_key": "",
-      "label": "GLM-4-Flash",
-      "provider": "zhipu",
-      "api_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      "model_name": "glm-4-flash",
-      "enabled": true
-    },
-    "glm_4_7_flash": {
-      "name": "质谱 GLM-4.7-Flash",
-      "api_base": "https://open.bigmodel.cn/api/paas/v4/",
-      "model": "glm-4.7-flash",
-      "api_key": "",
-      "label": "GLM-4.7-Flash",
-      "provider": "zhipu",
-      "api_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      "model_name": "glm-4.7-flash",
       "enabled": true
     },
     "gpt_4o": {
       "name": "GPT-4o",
-      "api_base": "",
+      "provider": "openai_compatible",
+      "api_base": "https://api.openai.com/v1/",
       "model": "gpt-4o",
       "api_key": "",
-      "label": "GPT-4o",
-      "provider": "openai_compatible",
-      "api_url": "",
-      "model_name": "gpt-4o",
-      "enabled": true
-    },
-    "gpt_4o_mini": {
-      "name": "GPT-4o Mini",
-      "api_base": "",
-      "model": "gpt-4o-mini",
-      "api_key": "",
-      "label": "GPT-4o-mini",
-      "provider": "openai_compatible",
-      "api_url": "",
-      "model_name": "gpt-4o-mini",
-      "enabled": true
-    },
-    "gpt_5_4": {
-      "name": "GPT-5.4",
-      "api_base": "",
-      "model": "gpt-5.4",
-      "api_key": "",
-      "label": "GPT-5.4",
-      "provider": "openai_compatible",
-      "api_url": "",
-      "model_name": "gpt-5.4",
       "enabled": true
     }
   }
