@@ -7,10 +7,40 @@ from urllib import error, request
 import streamlit as st
 
 
-PROJECT_ROOT = Path(".")
+PROJECT_ROOT = Path(__file__).resolve().parent
 CONFIG_DIR = PROJECT_ROOT / "config"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 SYSTEM_PROMPT_FILE = PROMPTS_DIR / "system.md"
+
+DEFAULT_MODEL_CONFIG: Dict[str, Any] = {
+    "default_model": "deepseek_chat",
+    "models": {
+        "deepseek_chat": {
+            "name": "DeepSeek",
+            "provider": "deepseek",
+            "api_base": "https://api.deepseek.com/chat/completions",
+            "model": "deepseek-chat",
+            "api_key": "",
+            "enabled": True,
+        },
+        "glm_4_flash": {
+            "name": "智谱 GLM-4-Flash",
+            "provider": "zhipu",
+            "api_base": "https://open.bigmodel.cn/api/paas/v4/",
+            "model": "glm-4-flash",
+            "api_key": "",
+            "enabled": True,
+        },
+        "gpt_4o": {
+            "name": "GPT-4o",
+            "provider": "openai_compatible",
+            "api_base": "https://api.openai.com/v1/",
+            "model": "gpt-4o",
+            "api_key": "",
+            "enabled": True,
+        },
+    },
+}
 
 
 def inject_styles() -> None:
@@ -211,16 +241,15 @@ def read_text(file_path: Path) -> str:
 def load_model_config() -> Dict[str, Any]:
     config_path = CONFIG_DIR / "models.json"
     if not config_path.exists():
-        return {"default_model": "deepseek_chat", "models": {}}
-    return json.loads(read_text(config_path))
+        return json.loads(json.dumps(DEFAULT_MODEL_CONFIG, ensure_ascii=False))
+    try:
+        return json.loads(read_text(config_path))
+    except (OSError, json.JSONDecodeError):
+        return json.loads(json.dumps(DEFAULT_MODEL_CONFIG, ensure_ascii=False))
 
 
 def save_model_config(model_config: Dict[str, Any]) -> None:
-    config_path = CONFIG_DIR / "models.json"
-    config_path.write_text(
-        json.dumps(model_config, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    st.session_state.model_config = model_config
 
 
 def get_model_options(model_config: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -256,8 +285,10 @@ def persist_model_api_key(model_key: str, api_key: str) -> None:
         return
 
     models[model_key]["api_key"] = normalized_key
-    save_model_config(model_config)
     st.session_state.model_config = model_config
+    if "manual_api_keys" not in st.session_state:
+        st.session_state.manual_api_keys = {}
+    st.session_state.manual_api_keys[model_key] = normalized_key
 
 
 def init_session_state() -> None:
@@ -270,7 +301,10 @@ def init_session_state() -> None:
     if "selected_model" not in st.session_state:
         valid_keys = [item["key"] for item in st.session_state.model_options]
         default_model = st.session_state.model_config.get("default_model", "deepseek_chat")
-        st.session_state.selected_model = default_model if default_model in valid_keys else valid_keys[0]
+        if valid_keys:
+            st.session_state.selected_model = default_model if default_model in valid_keys else valid_keys[0]
+        else:
+            st.session_state.selected_model = default_model
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "current_identity" not in st.session_state:
@@ -461,6 +495,9 @@ def render_sidebar() -> str:
 
         with st.expander("高级设置", expanded=False):
             options = st.session_state.model_options
+            if not options:
+                st.caption("没有可用的模型配置")
+                return resolve_api_key(current_model, selected_model_info)
             option_names = [item["name"] for item in options]
             key_to_name = {item["key"]: item["name"] for item in options}
             name_to_key = {item["name"]: item["key"] for item in options}
