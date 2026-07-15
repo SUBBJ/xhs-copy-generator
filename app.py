@@ -462,6 +462,19 @@ def render_sidebar() -> str:
             st.session_state.api_base_input = ""
         st.title("⚡ 智能体")
 
+        with st.expander("📋 历史消息", expanded=True):
+            if st.session_state.messages:
+                for item in st.session_state.messages[-12:]:
+                    role_label = "你" if item["role"] == "user" else "助手"
+                    preview = item["content"].strip().replace("\n", " ")
+                    if len(preview) > 60:
+                        preview = f"{preview[:60]}..."
+                    st.caption(f"{role_label}：{preview}")
+            else:
+                st.caption("暂无历史消息")
+
+        st.divider()
+
         selected_model_info = get_selected_model_info(
             st.session_state.model_config,
             st.session_state.selected_model,
@@ -511,28 +524,7 @@ def render_sidebar() -> str:
         status_text = st.session_state.api_key_detect_status or "未连接"
         st.caption(status_text)
 
-        with st.expander("高级设置", expanded=False):
-            options = st.session_state.model_options
-            if not options:
-                st.caption("没有可用的模型配置")
-                return resolve_api_key(current_model, selected_model_info)
-            option_names = [item["name"] for item in options]
-            key_to_name = {item["key"]: item["name"] for item in options}
-            name_to_key = {item["name"]: item["key"] for item in options}
-
-            current_name = key_to_name.get(st.session_state.selected_model, option_names[0])
-            selected_name = st.selectbox(
-                "选择模型",
-                options=option_names,
-                index=option_names.index(current_name),
-                key="model_selectbox",
-            )
-            new_key = name_to_key[selected_name]
-            if new_key != st.session_state.selected_model:
-                st.session_state.selected_model = new_key
-                sync_api_key_input_for_model()
-                sync_api_base_input_for_model()
-
+        with st.expander("⚙️ 高级设置", expanded=False):
             st.text_input(
                 "API Base URL",
                 key="api_base_input",
@@ -598,7 +590,6 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    render_chat_history()
     handle_user_message(active_api_key)
 
 
