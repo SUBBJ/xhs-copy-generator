@@ -344,6 +344,8 @@ def init_session_state() -> None:
         st.session_state.api_key_input = resolve_api_key(current_model, get_selected_model_info(st.session_state.model_config, current_model))
     if "api_base_input" not in st.session_state:
         st.session_state.api_base_input = ""
+    if "model_name_input" not in st.session_state:
+        st.session_state.model_name_input = ""
     if "api_key_detect_status" not in st.session_state:
         st.session_state.api_key_detect_status = ""
 
@@ -426,7 +428,8 @@ def call_chat_model(
     if not api_url.endswith("chat/completions"):
         api_url = f"{api_url}/chat/completions"
 
-    model_name = str(model_info.get("model") or model_info.get("model_name", "")).strip()
+    manual_model_name = str(st.session_state.get("model_name_input", "")).strip()
+    model_name = manual_model_name or str(model_info.get("model") or model_info.get("model_name", "")).strip()
     if not api_url or not model_name:
         raise RuntimeError("当前选中模型配置不完整，请检查 config/models.json。")
 
@@ -494,6 +497,12 @@ def render_sidebar() -> str:
                 key="api_base_input",
                 placeholder="例如：https://artislg.com/api/v1",
                 help="留空则使用当前模型配置中的默认地址",
+            )
+            st.text_input(
+                "模型名称",
+                key="model_name_input",
+                placeholder="例如：gpt-4o",
+                help="留空则使用自动识别到的默认模型名",
             )
 
         normalized_input = api_key_input.strip()
