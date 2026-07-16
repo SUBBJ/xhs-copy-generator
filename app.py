@@ -47,14 +47,15 @@ def inject_styles() -> None:
         """
         <style>
         :root {
-            --bg-0: #0b0d15;
-            --bg-1: #1d2234;
-            --panel: rgba(255, 255, 255, 0.07);
-            --panel-strong: rgba(255, 255, 255, 0.12);
-            --border: rgba(255, 255, 255, 0.12);
-            --text-main: rgba(255, 255, 255, 0.98);
-            --text-sub: rgba(255, 255, 255, 0.82);
-            --text-muted: rgba(255, 255, 255, 0.62);
+            --bg-0: #f5f7fb;
+            --bg-1: #eef2f7;
+            --panel: rgba(255, 255, 255, 0.96);
+            --panel-strong: rgba(255, 255, 255, 1);
+            --border: rgba(24, 31, 54, 0.08);
+            --text-main: rgba(19, 24, 39, 0.96);
+            --text-sub: rgba(19, 24, 39, 0.76);
+            --text-muted: rgba(19, 24, 39, 0.54);
+            --shadow: 0 18px 50px rgba(20, 28, 48, 0.08);
         }
 
         html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {
@@ -67,23 +68,24 @@ def inject_styles() -> None:
         }
 
         [data-testid="stSidebar"] {
-            background: #0f111a;
-            border-right: 1px solid rgba(255, 255, 255, 0.05);
+            background: #ffffff;
+            border-right: 1px solid rgba(24, 31, 54, 0.08);
         }
 
         [data-testid="stSidebar"] > div:first-child {
             margin: 12px;
             border-radius: 18px;
             padding: 10px 12px 14px 12px;
-            background: rgba(255, 255, 255, 0.025);
-            border: 1px solid rgba(255, 255, 255, 0.05);
+            background: rgba(245, 247, 251, 0.88);
+            border: 1px solid rgba(24, 31, 54, 0.08);
+            box-shadow: 0 10px 26px rgba(20, 28, 48, 0.05);
         }
 
         .main .block-container {
             max-width: 1200px;
             padding-top: 2rem;
             padding-bottom: 7.5rem;
-            color: #ffffff;
+            color: var(--text-main);
         }
 
         .main .block-container h1,
@@ -92,16 +94,14 @@ def inject_styles() -> None:
         .main .block-container p,
         .main .block-container span,
         .main .block-container div {
-            color: rgba(255, 255, 255, 0.96);
+            color: var(--text-main);
         }
 
         .hero-shell {
             border-radius: 22px;
-            background: linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.08));
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            box-shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
             padding: 1.55rem 1.55rem 1.15rem 1.55rem;
             margin-bottom: 1.1rem;
         }
@@ -114,7 +114,7 @@ def inject_styles() -> None:
         }
 
         .hero-kicker {
-            color: rgba(255, 255, 255, 0.7) !important;
+            color: var(--text-muted) !important;
             font-size: 0.78rem;
             letter-spacing: 0.18em;
             text-transform: uppercase;
@@ -122,17 +122,16 @@ def inject_styles() -> None:
         }
 
         .hero-title {
-            color: #ffffff !important;
+            color: var(--text-main) !important;
             font-size: clamp(2rem, 4vw, 3rem);
             line-height: 1.05;
             font-weight: 800;
             letter-spacing: -0.04em;
             margin: 0 0 0.45rem 0;
-            text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
         }
 
         .hero-subtitle {
-            color: rgba(255, 255, 255, 0.9) !important;
+            color: var(--text-sub) !important;
             font-size: 1rem;
             line-height: 1.65;
             max-width: 52rem;
@@ -143,21 +142,21 @@ def inject_styles() -> None:
             margin-top: 0.9rem;
             padding: 1rem 1.1rem 1.05rem 1.1rem;
             border-radius: 18px;
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
         }
 
         .welcome-title {
             margin: 0 0 0.35rem 0;
             font-size: 1.02rem;
             font-weight: 700;
-            color: rgba(255, 255, 255, 0.96);
+            color: var(--text-main);
         }
 
         .welcome-copy {
             margin: 0;
-            color: rgba(255, 255, 255, 0.78);
+            color: var(--text-sub);
             line-height: 1.6;
             font-size: 0.94rem;
         }
@@ -172,9 +171,9 @@ def inject_styles() -> None:
         .welcome-pill {
             padding: 0.42rem 0.7rem;
             border-radius: 999px;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            color: rgba(255, 255, 255, 0.86);
+            background: #f5f7fb;
+            border: 1px solid rgba(24, 31, 54, 0.08);
+            color: var(--text-sub);
             font-size: 0.82rem;
         }
 
@@ -182,9 +181,9 @@ def inject_styles() -> None:
             margin-top: 0.9rem;
             padding: 0.95rem 1rem;
             border-radius: 16px;
-            border: 1px dashed rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.08);
-            color: rgba(255, 255, 255, 0.9) !important;
+            border: 1px dashed rgba(24, 31, 54, 0.14);
+            background: rgba(255, 255, 255, 0.96);
+            color: var(--text-sub) !important;
         }
 
         [data-testid="stChatMessage"] {
@@ -210,20 +209,19 @@ def inject_styles() -> None:
         [data-testid="stChatMessage"]:has([aria-label="user"]) > div {
             max-width: min(78%, 820px);
             border-radius: 16px;
-            background: linear-gradient(145deg, #2a2f45 0%, #22263a 100%);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: #ffffff;
+            border: 1px solid rgba(24, 31, 54, 0.08);
             padding: 0.92rem 1rem;
-            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 12px 28px rgba(20, 28, 48, 0.08);
         }
 
         [data-testid="stChatMessage"]:has([aria-label="assistant"]) > div {
             max-width: min(78%, 820px);
             border-radius: 16px;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.07);
+            background: #ffffff;
+            border: 1px solid rgba(24, 31, 54, 0.08);
             padding: 0.92rem 1rem;
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
+            box-shadow: 0 12px 28px rgba(20, 28, 48, 0.08);
         }
 
         [data-testid="stChatMessageUser"] {
@@ -238,23 +236,25 @@ def inject_styles() -> None:
 
         [data-testid="stChatMessageUser"] div {
             max-width: 80% !important;
-            background: #2a2f45 !important;
+            background: #ffffff !important;
+            border: 1px solid rgba(24, 31, 54, 0.08) !important;
             border-radius: 16px !important;
             padding: 12px 18px !important;
+            box-shadow: 0 12px 28px rgba(20, 28, 48, 0.08);
         }
 
         [data-testid="stChatMessageAssistant"] div {
             max-width: 80% !important;
-            background: rgba(255, 255, 255, 0.06) !important;
+            background: #ffffff !important;
+            border: 1px solid rgba(24, 31, 54, 0.08) !important;
             border-radius: 16px !important;
             padding: 12px 18px !important;
+            box-shadow: 0 12px 28px rgba(20, 28, 48, 0.08);
         }
 
         [data-testid="stChatInput"] {
-            background: rgba(255, 255, 255, 0.05);
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
+            background: rgba(255, 255, 255, 0.98);
+            border-top: 1px solid rgba(24, 31, 54, 0.08);
         }
 
         [data-testid="stChatInput"] textarea {
@@ -269,19 +269,22 @@ def inject_styles() -> None:
         [data-testid="stTextInput"] input,
         [data-testid="stSelectbox"] [role="combobox"] {
             border-radius: 12px !important;
+            background: #ffffff !important;
+            border-color: rgba(24, 31, 54, 0.12) !important;
+            color: var(--text-main) !important;
         }
 
         [data-testid="stSidebar"] label,
         [data-testid="stSidebar"] p,
         [data-testid="stSidebar"] div,
         [data-testid="stSidebar"] span {
-            color: rgba(255, 255, 255, 0.88);
+            color: var(--text-main);
         }
 
         [data-testid="stSidebar"] .stExpander {
             border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(24, 31, 54, 0.08);
+            background: rgba(255, 255, 255, 0.96);
         }
         </style>
         """,
