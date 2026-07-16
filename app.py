@@ -344,8 +344,8 @@ def init_session_state() -> None:
         st.session_state.api_key_input = resolve_api_key(current_model, get_selected_model_info(st.session_state.model_config, current_model))
     if "api_base_input" not in st.session_state:
         st.session_state.api_base_input = ""
-    if "model_name_input" not in st.session_state:
-        st.session_state.model_name_input = ""
+    if "custom_model_name" not in st.session_state:
+        st.session_state.custom_model_name = str(st.session_state.get("model_name_input", "")).strip()
     if "api_key_detect_status" not in st.session_state:
         st.session_state.api_key_detect_status = ""
 
@@ -389,6 +389,25 @@ def get_detected_model_label(model_key: str, model_config: Dict[str, Any]) -> st
     return str(get_selected_model_info(model_config, model_key).get("name", model_key))
 
 
+def resolve_model_name(model_config: Dict[str, Any], selected_model: str) -> str:
+    custom_model_name = str(st.session_state.get("custom_model_name", "")).strip()
+    if custom_model_name:
+        return custom_model_name
+
+    model_info = get_selected_model_info(model_config, selected_model)
+    provider = str(model_info.get("provider", "")).strip().lower()
+    if provider == "openai_compatible":
+        return "gpt-4.5"
+
+    config_model_name = str(model_info.get("model") or model_info.get("model_name", "")).strip()
+    if config_model_name:
+        return config_model_name
+
+    default_model_key = str(model_config.get("default_model", "")).strip()
+    default_model_info = get_selected_model_info(model_config, default_model_key)
+    return str(default_model_info.get("model") or default_model_info.get("model_name", "")).strip()
+
+
 def infer_identity_from_user_text(user_text: str) -> None:
     normalized = user_text.strip()
     if "我是" in normalized and len(normalized) > 2:
@@ -428,8 +447,7 @@ def call_chat_model(
     if not api_url.endswith("chat/completions"):
         api_url = f"{api_url}/chat/completions"
 
-    manual_model_name = str(st.session_state.get("model_name_input", "")).strip()
-    model_name = manual_model_name or str(model_info.get("model") or model_info.get("model_name", "")).strip()
+    model_name = resolve_model_name(model_config, selected_model)
     if not api_url or not model_name:
         raise RuntimeError("当前选中模型配置不完整，请检查 config/models.json。")
 
@@ -500,8 +518,8 @@ def render_sidebar() -> str:
             )
             st.text_input(
                 "模型名称",
-                key="model_name_input",
-                placeholder="例如：gpt-4o",
+                key="custom_model_name",
+                placeholder="例如：gpt-4.5",
                 help="留空则使用自动识别到的默认模型名",
             )
 
