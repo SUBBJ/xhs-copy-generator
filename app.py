@@ -1,5 +1,7 @@
 import json
+import uuid
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib import error, request
 
@@ -299,11 +301,25 @@ def read_text(file_path: Path) -> str:
 def load_model_config() -> Dict[str, Any]:
     config_path = CONFIG_DIR / "models.json"
     if not config_path.exists():
-        return json.loads(json.dumps(DEFAULT_MODEL_CONFIG, ensure_ascii=False))
+        data = json.loads(json.dumps(DEFAULT_MODEL_CONFIG, ensure_ascii=False))
+        data["saved_configs"] = []
+        return data
     try:
-        return json.loads(read_text(config_path))
+        data = json.loads(read_text(config_path))
     except (OSError, json.JSONDecodeError):
-        return json.loads(json.dumps(DEFAULT_MODEL_CONFIG, ensure_ascii=False))
+        data = json.loads(json.dumps(DEFAULT_MODEL_CONFIG, ensure_ascii=False))
+    if "saved_configs" not in data or not isinstance(data.get("saved_configs"), list):
+        data["saved_configs"] = []
+    return data
+
+
+def save_model_config_to_disk(model_config: Dict[str, Any]) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    config_path = CONFIG_DIR / "models.json"
+    payload = json.loads(json.dumps(model_config, ensure_ascii=False))
+    if "saved_configs" not in payload or not isinstance(payload.get("saved_configs"), list):
+        payload["saved_configs"] = []
+    config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def get_selected_model_info(model_config: Dict[str, Any], selected_model: str) -> Dict[str, Any]:
@@ -316,6 +332,91 @@ def get_model_options(model_config: Dict[str, Any]) -> List[Dict[str, str]]:
         if model_info.get("enabled", True):
             options.append({"key": model_key, "name": str(model_info.get("name", model_key))})
     return options
+
+
+def get_saved_configs(model_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    saved_configs = model_config.get("saved_configs", [])
+    if isinstance(saved_configs, list):
+        return [item for item in saved_configs if isinstance(item, dict) and item.get("id")]
+    return []
+
+
+def generate_saved_config_name(saved_configs: List[Dict[str, Any]]) -> str:
+    existing_names = {str(item.get("name", "")).strip() for item in saved_configs}
+    index = 1
+    while True:
+        candidate = f"配置{index}"
+        if candidate not in existing_names:
+            return candidate
+        index += 1
+
+
+def make_saved_config_record(name: str, api_key: str, api_base: str, model_name: str) -> Dict[str, str]:
+    timestamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    return {
+        "id": uuid.uuid4().hex,
+        "name": name,
+        "api_key": api_key,
+        "api_base": api_base,
+        "model": model_name,
+        "created_at": timestamp,
+    }
+
+
+def get_saved_config_by_id(model_config: Dict[str, Any], config_id: str) -> Optional[Dict[str, Any]]:
+    for item in get_saved_configs(model_config):
+        if str(item.get("id", "")).strip() == str(config_id).strip():
+            return item
+    return None
+
+
+def apply_saved_config_to_session_state(saved_config: Dict[str, Any]) -> None:
+    st.session_state.api_key_input = str(saved_config.get("api_key", "")).strip()
+    st.session_state.api_base_input = str(saved_config.get("api_base", "")).strip()
+    st.session_state.custom_model_name = str(saved_config.get("model", "")).strip()
+    st.session_state.saved_config_name_input = str(saved_config.get("name", "")).strip()
+    st.session_state.saved_config_selector = str(saved_config.get("id", "")).strip()
+    st.session_state.applied_saved_config_id = str(saved_config.get("id", "")).strip()
+
+
+def persist_saved_config(model_config: Dict[str, Any], saved_config: Dict[str, Any]) -> Dict[str, Any]:
+    updated_config = json.loads(json.dumps(model_config, ensure_ascii=False))
+    saved_configs = get_saved_configs(updated_config)
+    saved_configs.append(saved_config)
+    updated_config["saved_configs"] = saved_configs
+    save_model_config_to_disk(updated_config)
+    return updated_config
+
+
+def update_saved_config(model_config: Dict[str, Any], saved_config: Dict[str, Any]) -> Dict[str, Any]:
+    updated_config = json.loads(json.dumps(model_config, ensure_ascii=False))
+    saved_configs = get_saved_configs(updated_config)
+    target_id = str(saved_config.get("id", "")).strip()
+    next_saved_configs: List[Dict[str, Any]] = []
+    replaced = False
+    for item in saved_configs:
+        if str(item.get("id", "")).strip() == target_id:
+            next_saved_configs.append(saved_config)
+            replaced = True
+        else:
+            next_saved_configs.append(item)
+    if not replaced:
+        next_saved_configs.append(saved_config)
+    updated_config["saved_configs"] = next_saved_configs
+    save_model_config_to_disk(updated_config)
+    return updated_config
+
+
+def delete_saved_config(model_config: Dict[str, Any], config_id: str) -> Dict[str, Any]:
+    updated_config = json.loads(json.dumps(model_config, ensure_ascii=False))
+    saved_configs = [
+        item
+        for item in get_saved_configs(updated_config)
+        if str(item.get("id", "")).strip() != str(config_id).strip()
+    ]
+    updated_config["saved_configs"] = saved_configs
+    save_model_config_to_disk(updated_config)
+    return updated_config
 
 
 def resolve_api_key(model_key: str, model_info: Dict[str, Any]) -> str:
@@ -346,6 +447,12 @@ def init_session_state() -> None:
         st.session_state.api_base_input = ""
     if "custom_model_name" not in st.session_state:
         st.session_state.custom_model_name = str(st.session_state.get("model_name_input", "")).strip()
+    if "saved_config_name_input" not in st.session_state:
+        st.session_state.saved_config_name_input = ""
+    if "saved_config_selector" not in st.session_state:
+        st.session_state.saved_config_selector = ""
+    if "applied_saved_config_id" not in st.session_state:
+        st.session_state.applied_saved_config_id = ""
     if "api_key_detect_status" not in st.session_state:
         st.session_state.api_key_detect_status = ""
 
@@ -487,6 +594,12 @@ def render_sidebar() -> str:
     with st.sidebar:
         st.title("⚡ 智能体")
 
+        saved_configs = get_saved_configs(st.session_state.model_config)
+        saved_config_ids = {str(item.get("id", "")).strip() for item in saved_configs}
+        if st.session_state.get("saved_config_selector", "") not in saved_config_ids:
+            st.session_state.saved_config_selector = ""
+            st.session_state.applied_saved_config_id = ""
+
         with st.expander("📋 历史消息", expanded=True):
             if st.session_state.messages:
                 for item in st.session_state.messages[-12:]:
@@ -502,6 +615,52 @@ def render_sidebar() -> str:
         current_info = get_selected_model_info(st.session_state.model_config, current_model)
 
         st.caption(st.session_state.api_key_detect_status or "未连接")
+
+        with st.expander("📁 已保存配置", expanded=True):
+            if saved_configs:
+                saved_options = [""] + [str(item.get("id", "")).strip() for item in saved_configs]
+
+                def format_saved_config(option_id: str) -> str:
+                    if not option_id:
+                        return "请选择已保存配置"
+                    saved_item = get_saved_config_by_id(st.session_state.model_config, option_id)
+                    if not saved_item:
+                        return "请选择已保存配置"
+                    label = str(saved_item.get("name", option_id)).strip() or option_id
+                    model_label = str(saved_item.get("model", "")).strip()
+                    if model_label:
+                        return f"{label}  ·  {model_label}"
+                    return label
+
+                selected_saved_id = st.selectbox(
+                    "已保存配置",
+                    options=saved_options,
+                    key="saved_config_selector",
+                    format_func=format_saved_config,
+                )
+                if selected_saved_id:
+                    selected_saved = get_saved_config_by_id(st.session_state.model_config, selected_saved_id)
+                    if selected_saved and selected_saved_id != st.session_state.get("applied_saved_config_id", ""):
+                        apply_saved_config_to_session_state(selected_saved)
+
+                for saved_item in saved_configs:
+                    saved_id = str(saved_item.get("id", "")).strip()
+                    saved_name = str(saved_item.get("name", saved_id)).strip() or saved_id
+                    saved_model = str(saved_item.get("model", "")).strip() or "未填写模型"
+                    col_left, col_right = st.columns([0.78, 0.22], vertical_alignment="center")
+                    with col_left:
+                        st.caption(f"{saved_name} · {saved_model}")
+                    with col_right:
+                        if st.button("删除", key=f"delete_saved_config_{saved_id}", use_container_width=True):
+                            updated_config = delete_saved_config(st.session_state.model_config, saved_id)
+                            st.session_state.model_config = updated_config
+                            st.session_state.model_options = get_model_options(updated_config)
+                            if str(st.session_state.get("saved_config_selector", "")).strip() == saved_id:
+                                st.session_state.saved_config_selector = ""
+                                st.session_state.applied_saved_config_id = ""
+                            st.rerun()
+            else:
+                st.caption("暂无已保存配置")
 
         with st.expander("⚙️ 高级设置", expanded=False):
             api_key_input = st.text_input(
@@ -522,6 +681,30 @@ def render_sidebar() -> str:
                 placeholder="例如：gpt-4.5",
                 help="留空则使用自动识别到的默认模型名",
             )
+
+            if "saved_config_name_input" not in st.session_state:
+                st.session_state.saved_config_name_input = ""
+            st.text_input(
+                "配置名称",
+                key="saved_config_name_input",
+                placeholder="例如：工作配置",
+                help="不填则自动生成名称",
+            )
+            if st.button("保存配置", use_container_width=True):
+                current_name = str(st.session_state.get("saved_config_name_input", "")).strip()
+                if not current_name:
+                    current_name = generate_saved_config_name(saved_configs)
+                current_api_key = str(st.session_state.get("api_key_input", "")).strip()
+                current_api_base = str(st.session_state.get("api_base_input", "")).strip()
+                current_model_name = str(st.session_state.get("custom_model_name", "")).strip()
+                saved_record = make_saved_config_record(current_name, current_api_key, current_api_base, current_model_name)
+                updated_config = persist_saved_config(st.session_state.model_config, saved_record)
+                st.session_state.model_config = updated_config
+                st.session_state.model_options = get_model_options(updated_config)
+                st.session_state.saved_config_selector = str(saved_record["id"])
+                st.session_state.applied_saved_config_id = str(saved_record["id"])
+                st.session_state.saved_config_name_input = current_name
+                st.rerun()
 
         normalized_input = api_key_input.strip()
         if not normalized_input:
