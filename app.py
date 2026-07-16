@@ -96,8 +96,15 @@ def inject_styles() -> None:
             margin-bottom: 1rem;
         }
 
+        .hero-shell *,
+        .hero-shell h1,
+        .hero-shell p,
+        .hero-shell div {
+            color: var(--text-main) !important;
+        }
+
         .hero-kicker {
-            color: var(--text-muted);
+            color: var(--text-muted) !important;
             font-size: 0.78rem;
             letter-spacing: 0.18em;
             text-transform: uppercase;
@@ -105,7 +112,7 @@ def inject_styles() -> None:
         }
 
         .hero-title {
-            color: var(--text-main);
+            color: var(--text-main) !important;
             font-size: clamp(2rem, 4vw, 3rem);
             line-height: 1.05;
             font-weight: 800;
@@ -115,7 +122,7 @@ def inject_styles() -> None:
         }
 
         .hero-subtitle {
-            color: var(--text-sub);
+            color: var(--text-sub) !important;
             font-size: 1rem;
             line-height: 1.65;
             max-width: 52rem;
@@ -128,7 +135,7 @@ def inject_styles() -> None:
             border-radius: 16px;
             border: 1px dashed rgba(255, 255, 255, 0.12);
             background: rgba(255, 255, 255, 0.03);
-            color: var(--text-sub);
+            color: var(--text-sub) !important;
         }
 
         [data-testid="stChatMessage"] {
