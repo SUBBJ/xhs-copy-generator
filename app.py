@@ -654,23 +654,31 @@ def main() -> None:
         page_icon="💬",
         layout="wide",
     )
-    init_session_state()
-    inject_styles()
+    try:
+        init_session_state()
+        inject_styles()
 
-    active_api_key = render_sidebar_v2()
+        try:
+            active_api_key = render_sidebar_v2()
+        except Exception as exc:  # noqa: BLE001
+            st.sidebar.error(f"侧边栏渲染失败：{exc}")
+            active_api_key = ""
 
-    st.markdown(
-        """
-        <div class="hero-shell">
-            <div class="hero-kicker">Free conversation</div>
-            <h1 class="hero-title">自由对话助手</h1>
-            <p class="hero-subtitle">像正常聊天一样直接说，系统会根据上下文自由回应。</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        st.markdown(
+            """
+            <div class="hero-shell">
+                <div class="hero-kicker">Free conversation</div>
+                <h1 class="hero-title">自由对话助手</h1>
+                <p class="hero-subtitle">像正常聊天一样直接说，系统会根据上下文自由回应。</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    handle_user_message(active_api_key)
+        render_chat_history()
+        handle_user_message(active_api_key)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"页面渲染失败：{exc}")
 
 
 if __name__ == "__main__":
