@@ -48,13 +48,13 @@ def inject_styles() -> None:
         <style>
         :root {
             --bg-0: #0b0d15;
-            --bg-1: #171b2b;
-            --panel: rgba(255, 255, 255, 0.05);
-            --panel-strong: rgba(255, 255, 255, 0.08);
-            --border: rgba(255, 255, 255, 0.08);
-            --text-main: rgba(255, 255, 255, 0.96);
-            --text-sub: rgba(255, 255, 255, 0.72);
-            --text-muted: rgba(255, 255, 255, 0.52);
+            --bg-1: #1d2234;
+            --panel: rgba(255, 255, 255, 0.07);
+            --panel-strong: rgba(255, 255, 255, 0.12);
+            --border: rgba(255, 255, 255, 0.12);
+            --text-main: rgba(255, 255, 255, 0.98);
+            --text-sub: rgba(255, 255, 255, 0.82);
+            --text-muted: rgba(255, 255, 255, 0.62);
         }
 
         html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {
@@ -83,17 +83,27 @@ def inject_styles() -> None:
             max-width: 1200px;
             padding-top: 2rem;
             padding-bottom: 7.5rem;
+            color: #ffffff;
+        }
+
+        .main .block-container h1,
+        .main .block-container h2,
+        .main .block-container h3,
+        .main .block-container p,
+        .main .block-container span,
+        .main .block-container div {
+            color: rgba(255, 255, 255, 0.96);
         }
 
         .hero-shell {
             border-radius: 22px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 28px 90px rgba(0, 0, 0, 0.35);
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.08));
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            box-shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
             backdrop-filter: blur(18px);
             -webkit-backdrop-filter: blur(18px);
-            padding: 1.4rem 1.4rem 1rem 1.4rem;
-            margin-bottom: 1rem;
+            padding: 1.55rem 1.55rem 1.15rem 1.55rem;
+            margin-bottom: 1.1rem;
         }
 
         .hero-shell *,
@@ -104,7 +114,7 @@ def inject_styles() -> None:
         }
 
         .hero-kicker {
-            color: var(--text-muted) !important;
+            color: rgba(255, 255, 255, 0.7) !important;
             font-size: 0.78rem;
             letter-spacing: 0.18em;
             text-transform: uppercase;
@@ -112,7 +122,7 @@ def inject_styles() -> None:
         }
 
         .hero-title {
-            color: var(--text-main) !important;
+            color: #ffffff !important;
             font-size: clamp(2rem, 4vw, 3rem);
             line-height: 1.05;
             font-weight: 800;
@@ -122,20 +132,59 @@ def inject_styles() -> None:
         }
 
         .hero-subtitle {
-            color: var(--text-sub) !important;
+            color: rgba(255, 255, 255, 0.9) !important;
             font-size: 1rem;
             line-height: 1.65;
             max-width: 52rem;
             margin: 0;
         }
 
+        .welcome-panel {
+            margin-top: 0.9rem;
+            padding: 1rem 1.1rem 1.05rem 1.1rem;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+        }
+
+        .welcome-title {
+            margin: 0 0 0.35rem 0;
+            font-size: 1.02rem;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.96);
+        }
+
+        .welcome-copy {
+            margin: 0;
+            color: rgba(255, 255, 255, 0.78);
+            line-height: 1.6;
+            font-size: 0.94rem;
+        }
+
+        .welcome-pills {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.85rem;
+        }
+
+        .welcome-pill {
+            padding: 0.42rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.86);
+            font-size: 0.82rem;
+        }
+
         .empty-hint {
             margin-top: 0.9rem;
-            padding: 0.85rem 1rem;
+            padding: 0.95rem 1rem;
             border-radius: 16px;
-            border: 1px dashed rgba(255, 255, 255, 0.12);
-            background: rgba(255, 255, 255, 0.03);
-            color: var(--text-sub) !important;
+            border: 1px dashed rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.9) !important;
         }
 
         [data-testid="stChatMessage"] {
@@ -520,6 +569,20 @@ def main() -> None:
     )
 
     if not st.session_state.messages:
+        st.markdown(
+            """
+            <div class="welcome-panel">
+                <div class="welcome-title">准备好了，直接开聊</div>
+                <p class="welcome-copy">这里没有模式切换，也没有固定模板。你可以直接问问题、让它写文案、做策划，或者先把 API Key 和 Base URL 配好再开始。</p>
+                <div class="welcome-pills">
+                    <span class="welcome-pill">直接对话</span>
+                    <span class="welcome-pill">自由回复</span>
+                    <span class="welcome-pill">会话独立</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown(
             """
             <div class="empty-hint">
