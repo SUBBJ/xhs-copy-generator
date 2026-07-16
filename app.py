@@ -371,10 +371,22 @@ def get_saved_config_by_id(model_config: Dict[str, Any], config_id: str) -> Opti
 
 
 def apply_saved_config_to_session_state(saved_config: Dict[str, Any]) -> None:
+    if "saved_config_selector" not in st.session_state:
+        st.session_state.saved_config_selector = ""
+    if "saved_configs" not in st.session_state:
+        st.session_state.saved_configs = []
+    if "current_config_name" not in st.session_state:
+        st.session_state.current_config_name = ""
+    if "saved_config_name_input" not in st.session_state:
+        st.session_state.saved_config_name_input = ""
+    if "applied_saved_config_id" not in st.session_state:
+        st.session_state.applied_saved_config_id = ""
+
     st.session_state.api_key_input = str(saved_config.get("api_key", "")).strip()
     st.session_state.api_base_input = str(saved_config.get("api_base", "")).strip()
     st.session_state.custom_model_name = str(saved_config.get("model", "")).strip()
     st.session_state.saved_config_name_input = str(saved_config.get("name", "")).strip()
+    st.session_state.current_config_name = str(saved_config.get("name", "")).strip()
     st.session_state.saved_config_selector = str(saved_config.get("id", "")).strip()
     st.session_state.applied_saved_config_id = str(saved_config.get("id", "")).strip()
 
@@ -451,6 +463,10 @@ def init_session_state() -> None:
         st.session_state.saved_config_name_input = ""
     if "saved_config_selector" not in st.session_state:
         st.session_state.saved_config_selector = ""
+    if "saved_configs" not in st.session_state:
+        st.session_state.saved_configs = []
+    if "current_config_name" not in st.session_state:
+        st.session_state.current_config_name = ""
     if "applied_saved_config_id" not in st.session_state:
         st.session_state.applied_saved_config_id = ""
     if "api_key_detect_status" not in st.session_state:
